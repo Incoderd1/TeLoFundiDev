@@ -1,0 +1,41 @@
+{
+  "Files": [
+    {
+      "Id": "C:\\Users\\siric\\OneDrive\\Escritorio\\PlataformaSokkaClone\\src\\AgencyPlatform.API\\wwwroot\\uploads\\acompanantes\\1\\20250419151357_01b2f5fe-413b-4818-ac1e-cb0b3e027c56.png",
+      "PackagePath": "staticwebassets\\uploads\\acompanantes\\1\\20250419151357_01b2f5fe-413b-4818-ac1e-cb0b3e027c56.png"
+    },
+    {
+      "Id": "C:\\Users\\siric\\OneDrive\\Escritorio\\PlataformaSokkaClone\\src\\AgencyPlatform.API\\wwwroot\\uploads\\acompanantes\\1\\20250419155352_0c5b419d-3f1a-4d4c-8f08-4a004d3b65e6.png",
+      "PackagePath": "staticwebassets\\uploads\\acompanantes\\1\\20250419155352_0c5b419d-3f1a-4d4c-8f08-4a004d3b65e6.png"
+    },
+    {
+      "Id": "C:\\Users\\siric\\OneDrive\\Escritorio\\PlataformaSokkaClone\\src\\AgencyPlatform.API\\wwwroot\\uploads\\acompanantes\\1\\20250419155353_01e003e8-0d06-4e01-89e2-da5c776c97d9.png",
+      "PackagePath": "staticwebassets\\uploads\\acompanantes\\1\\20250419155353_01e003e8-0d06-4e01-89e2-da5c776c97d9.png"
+    },
+    {
+      "Id": "C:\\Users\\siric\\OneDrive\\Escritorio\\PlataformaSokkaClone\\src\\AgencyPlatform.API\\wwwroot\\uploads\\acompanantes\\1\\20250419155353_4db17e88-6af5-490c-858c-cb774b3a85e8.png",
+      "PackagePath": "staticwebassets\\uploads\\acompanantes\\1\\20250419155353_4db17e88-6af5-490c-858c-cb774b3a85e8.png"
+    },
+    {
+      "Id": "C:\\Users\\siric\\OneDrive\\Escritorio\\PlataformaSokkaClone\\src\\AgencyPlatform.API\\wwwroot\\uploads\\acompanantes\\1\\20250419155353_862b7409-8f8b-4fd5-8f4e-7cefc54ff0ff.png",
+      "PackagePath": "staticwebassets\\uploads\\acompanantes\\1\\20250419155353_862b7409-8f8b-4fd5-8f4e-7cefc54ff0ff.png"
+    },
+    {
+      "Id": "obj\\Debug\\net8.0\\staticwebassets\\msbuild.AgencyPlatform.API.Microsoft.AspNetCore.StaticWebAssets.props",
+      "PackagePath": "build\\Microsoft.AspNetCore.StaticWebAssets.props"
+    },
+    {
+      "Id": "obj\\Debug\\net8.0\\staticwebassets\\msbuild.build.AgencyPlatform.API.props",
+      "PackagePath": "build\\AgencyPlatform.API.props"
+    },
+    {
+      "Id": "obj\\Debug\\net8.0\\staticwebassets\\msbuild.buildMultiTargeting.AgencyPlatform.API.props",
+      "PackagePath": "buildMultiTargeting\\AgencyPlatform.API.props"
+    },
+    {
+      "Id": "obj\\Debug\\net8.0\\staticwebassets\\msbuild.buildTransitive.AgencyPlatform.API.props",
+      "PackagePath": "buildTransitive\\AgencyPlatform.API.props"
+    }
+  ],
+  "ElementsToRemove": []
+}

@@ -1,0 +1,26 @@
+{
+  "version": 2,
+  "dgSpecHash": "SKHW2HbBPDI=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\siric\\OneDrive\\Escritorio\\PlataformaSokkaClone\\src\\AgencyPlatform.Shared\\AgencyPlatform.Shared.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\siric\\.nuget\\packages\\bcrypt.net-next\\4.0.3\\bcrypt.net-next.4.0.3.nupkg.sha512",
+    "C:\\Users\\siric\\.nuget\\packages\\microsoft.bcl.memory\\9.0.0\\microsoft.bcl.memory.9.0.0.nupkg.sha512",
+    "C:\\Users\\siric\\.nuget\\packages\\microsoft.extensions.configuration\\8.0.0\\microsoft.extensions.configuration.8.0.0.nupkg.sha512",
+    "C:\\Users\\siric\\.nuget\\packages\\microsoft.extensions.configuration.abstractions\\8.0.0\\microsoft.extensions.configuration.abstractions.8.0.0.nupkg.sha512",
+    "C:\\Users\\siric\\.nuget\\packages\\microsoft.extensions.dependencyinjection.abstractions\\8.0.0\\microsoft.extensions.dependencyinjection.abstractions.8.0.0.nupkg.sha512",
+    "C:\\Users\\siric\\.nuget\\packages\\microsoft.extensions.logging.abstractions\\8.0.0\\microsoft.extensions.logging.abstractions.8.0.0.nupkg.sha512",
+    "C:\\Users\\siric\\.nuget\\packages\\microsoft.extensions.primitives\\8.0.0\\microsoft.extensions.primitives.8.0.0.nupkg.sha512",
+    "C:\\Users\\siric\\.nuget\\packages\\microsoft.identitymodel.abstractions\\8.8.0\\microsoft.identitymodel.abstractions.8.8.0.nupkg.sha512",
+    "C:\\Users\\siric\\.nuget\\packages\\microsoft.identitymodel.jsonwebtokens\\8.8.0\\microsoft.identitymodel.jsonwebtokens.8.8.0.nupkg.sha512",
+    "C:\\Users\\siric\\.nuget\\packages\\microsoft.identitymodel.logging\\8.8.0\\microsoft.identitymodel.logging.8.8.0.nupkg.sha512",
+    "C:\\Users\\siric\\.nuget\\packages\\microsoft.identitymodel.tokens\\8.8.0\\microsoft.identitymodel.tokens.8.8.0.nupkg.sha512",
+    "C:\\Users\\siric\\.nuget\\packages\\microsoft.openapi\\1.6.23\\microsoft.openapi.1.6.23.nupkg.sha512",
+    "C:\\Users\\siric\\.nuget\\packages\\questpdf\\2025.4.0\\questpdf.2025.4.0.nupkg.sha512",
+    "C:\\Users\\siric\\.nuget\\packages\\swashbuckle.aspnetcore.annotations\\8.1.1\\swashbuckle.aspnetcore.annotations.8.1.1.nupkg.sha512",
+    "C:\\Users\\siric\\.nuget\\packages\\swashbuckle.aspnetcore.swagger\\8.1.1\\swashbuckle.aspnetcore.swagger.8.1.1.nupkg.sha512",
+    "C:\\Users\\siric\\.nuget\\packages\\swashbuckle.aspnetcore.swaggergen\\8.1.1\\swashbuckle.aspnetcore.swaggergen.8.1.1.nupkg.sha512",
+    "C:\\Users\\siric\\.nuget\\packages\\system.identitymodel.tokens.jwt\\8.8.0\\system.identitymodel.tokens.jwt.8.8.0.nupkg.sha512"
+  ],
+  "logs": []
+}
