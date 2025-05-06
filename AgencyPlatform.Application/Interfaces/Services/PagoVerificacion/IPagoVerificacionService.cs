@@ -14,5 +14,6 @@ namespace AgencyPlatform.Application.Interfaces.Services.PagoVerificacion
         Task<PagoVerificacionDto> GetPagoByIdAsync(int pagoId);
         Task ConfirmarPagoAsync(int pagoId, string referenciaPago);
         Task CancelarPagoAsync(int pagoId, string motivo);
+        Task<string> CrearIntentoPagoAsync(int verificacionId);
     }
 }

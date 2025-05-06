@@ -16,8 +16,8 @@ namespace AgencyPlatform.Application.Interfaces.Services.Acompanantes
         Task<List<AcompananteDto>> GetAllAsync();
         Task<AcompananteDto> GetByIdAsync(int id);
         Task<AcompananteDto> GetByUsuarioIdAsync(int usuarioId);
-        Task<int> CrearAsync(CrearAcompananteDto nuevoAcompanante, int usuarioId);
-        Task ActualizarAsync(UpdateAcompananteDto acompananteActualizado, int usuarioId, int rolId);
+        Task<int> CrearAsync(CrearAcompananteDto nuevoAcompanante, int usuarioId, string clientIp);
+        Task ActualizarAsync(UpdateAcompananteDto acompananteActualizado, int usuarioId, int rolId, string clientIp);
         Task EliminarAsync(int id, int usuarioId, int rolId);
 
         // Gestión de fotos
@@ -53,12 +53,14 @@ namespace AgencyPlatform.Application.Interfaces.Services.Acompanantes
         // Disponibilidad
         Task CambiarDisponibilidadAsync(int acompananteId, bool estaDisponible, int usuarioId, int rolId);
 
-
-
+        // Métodos paginados
         Task<PaginatedResultDto<AcompananteDto>> GetAllPaginatedAsync(int pageNumber, int pageSize);
+        Task<PaginatedResultDto<AcompananteResumen2Dto>> GetAllPaginatedResumenAsync(int pageNumber, int pageSize);
         Task<PaginatedResultDto<AcompananteDto>> GetRecientesPaginadosAsync(int pageNumber, int pageSize);
         Task<PaginatedResultDto<AcompananteDto>> GetPopularesPaginadosAsync(int pageNumber, int pageSize);
         Task<PaginatedResultDto<AcompananteDto>> GetDestacadosPaginadosAsync(int pageNumber, int pageSize);
+
+        Task<PaginatedResultDto<AcompananteDto>> GetAllAsync(int pageNumber = 1, int pageSize = 10);
 
 
 

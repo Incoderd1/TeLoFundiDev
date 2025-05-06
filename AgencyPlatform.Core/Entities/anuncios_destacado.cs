@@ -24,6 +24,7 @@ public partial class anuncios_destacado
     public DateTime? created_at { get; set; }
 
     public DateTime? updated_at { get; set; }
+    public string payment_reference { get; set; }
 
     public virtual acompanante acompanante { get; set; } = null!;
 

@@ -3,6 +3,7 @@ using AgencyPlatform.Application.DTOs.Acompanantes;
 using AgencyPlatform.Application.DTOs.Agencias;
 using AgencyPlatform.Application.DTOs.Anuncios;
 using AgencyPlatform.Application.DTOs.Categoria;
+using AgencyPlatform.Application.DTOs.Cliente;
 using AgencyPlatform.Application.DTOs.Foto;
 using AgencyPlatform.Application.DTOs.Servicio;
 using AgencyPlatform.Application.DTOs.SolicitudesRegistroAgencia;
@@ -35,7 +36,9 @@ namespace AgencyPlatform.Infrastructure.Mappers
              .ForMember(dest => dest.Pais, opt => opt.MapFrom(src => src.pais ?? string.Empty))
              .ForMember(dest => dest.EstaVerificada, opt => opt.MapFrom(src => src.esta_verificada == true))
              .ForMember(dest => dest.FechaVerificacion, opt => opt.MapFrom(src => src.fecha_verificacion))
-             .ForMember(dest => dest.ComisionPorcentaje, opt => opt.MapFrom(src => src.comision_porcentaje));
+             .ForMember(dest => dest.ComisionPorcentaje, opt => opt.MapFrom(src => src.comision_porcentaje))
+                .ForMember(dest => dest.StripeAccountId, opt => opt.MapFrom(src => src.stripe_account_id));
+            
 
             CreateMap<CrearAgenciaDto, agencia>()
                     .ForMember(dest => dest.nombre, opt => opt.MapFrom(src => src.Nombre))
@@ -45,6 +48,16 @@ namespace AgencyPlatform.Infrastructure.Mappers
                     .ForMember(dest => dest.direccion, opt => opt.MapFrom(src => src.Direccion))
                     .ForMember(dest => dest.ciudad, opt => opt.MapFrom(src => src.Ciudad))
                     .ForMember(dest => dest.pais, opt => opt.MapFrom(src => src.Pais));
+
+
+            CreateMap<acompanante, AcompananteResumen2Dto>()
+                .ForMember(dest => dest.Nombre, opt => opt.MapFrom(src => src.nombre_perfil))
+                .ForMember(dest => dest.Edad, opt => opt.MapFrom(src => src.edad))
+                .ForMember(dest => dest.Pais, opt => opt.MapFrom(src => src.pais))
+                .ForMember(dest => dest.Descripcion, opt => opt.MapFrom(src => src.descripcion))
+                .ForMember(dest => dest.Genero, opt => opt.MapFrom(src => src.genero))
+                .ForMember(dest => dest.Fotos, opt => opt.MapFrom(src => src.fotos))
+                .ForMember(dest => dest.Whatsapp, opt => opt.MapFrom(src => src.whatsapp));
 
                 CreateMap<agencia, AgenciaPendienteVerificacionDto>()
                     .ForMember(dest => dest.Id, opt => opt.MapFrom(src => src.id))
@@ -110,7 +123,7 @@ namespace AgencyPlatform.Infrastructure.Mappers
                     .ForMember(dest => dest.TarifaBase, opt => opt.MapFrom(src => src.tarifa_base))
                     .ForMember(dest => dest.Moneda, opt => opt.MapFrom(src => src.moneda))
                     .ForMember(dest => dest.EstaVerificado, opt => opt.MapFrom(src => src.esta_verificado == true))
-                    .ForMember(dest => dest.FechaVerificacion, opt => opt.MapFrom(src => src.fecha_verificacion))
+                    .ForMember(dest => dest.Whatsapp, opt => opt.MapFrom(src => src.whatsapp))
                     .ForMember(dest => dest.EstaDisponible, opt => opt.MapFrom(src => src.esta_disponible == true))
                     .ForMember(dest => dest.Fotos, opt => opt.MapFrom(src => src.fotos))
                     .ForMember(dest => dest.Servicios, opt => opt.MapFrom(src => src.servicios))
@@ -193,6 +206,10 @@ namespace AgencyPlatform.Infrastructure.Mappers
                 .ForMember(dest => dest.Estado, opt => opt.MapFrom(src => src.estado))
                 .ForMember(dest => dest.FechaPago, opt => opt.MapFrom(src => src.fecha_pago));
 
+
+           
         }
-        }
+
     }
+        }
+    

@@ -33,5 +33,20 @@ namespace AgencyPlatform.Infrastructure.Repositories
                 .Where(d => d.paquete_id == paqueteId)
                 .ToListAsync();
         }
+
+        public async Task<List<paquetes_cupone>> GetAllActivosAsync()
+        {
+            return await _context.paquetes_cupones
+        .Where(p => p.activo == true)
+        .Include(p => p.paquete_cupones_detalles)  // Incluir detalles
+            .ThenInclude(d => d.tipo_cupon)        // Incluir tipo de cupón para cada detalle
+        .OrderBy(p => p.precio)
+        .ToListAsync();
+        }
+        public async Task<tipos_cupone> GetTipoCuponByIdAsync(int tipoCuponId)
+        {
+            return await _context.tipos_cupones
+                .FirstOrDefaultAsync(t => t.id == tipoCuponId);
+        }
     }
 }

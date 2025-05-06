@@ -15,7 +15,7 @@ namespace AgencyPlatform.Infrastructure.Repositories
 
         public MovimientoPuntosRepository(AgencyPlatformDbContext context)
         {
-            _context = context;
+            _context = context;    
         }
 
         public async Task<List<movimientos_punto>> GetByClienteIdAsync(int clienteId, int cantidad = 10)

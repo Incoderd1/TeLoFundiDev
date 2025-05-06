@@ -22,5 +22,8 @@ namespace AgencyPlatform.Application.Interfaces.Repositories
         Task UpdateAsync(categoria entity);
         Task DeleteAsync(categoria entity);
         Task SaveChangesAsync();
+
+        Task<List<dynamic>> GetCategoriasConCoincidenciaAsync(string searchTerm, int limit);
+
     }
 }

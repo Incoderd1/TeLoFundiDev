@@ -10,6 +10,7 @@ namespace AgencyPlatform.Application.DTOs.Verificaciones
     {
         public int Id { get; set; }
         public int VerificacionId { get; set; }
+
         public int AcompananteId { get; set; }
         public int AgenciaId { get; set; }
         public decimal Monto { get; set; }

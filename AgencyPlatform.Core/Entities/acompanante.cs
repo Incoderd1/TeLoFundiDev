@@ -56,6 +56,13 @@ public partial class acompanante
     public bool? mostrar_whatsapp { get; set; }     // boolean
     public bool? mostrar_email { get; set; }        // boolean
 
+    public double? latitud { get; set; }
+    public double? longitud { get; set; }
+    public string? direccion_completa { get; set; }
+    //public string? stripe_account_id { get; set; }
+
+  
+
 
     public virtual ICollection<acompanante_categoria> acompanante_categoria { get; set; } = new List<acompanante_categoria>();
 

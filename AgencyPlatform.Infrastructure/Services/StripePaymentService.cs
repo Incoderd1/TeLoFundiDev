@@ -1,12 +1,16 @@
-﻿using AgencyPlatform.Application.DTOs.Payment;
+﻿using AgencyPlatform.Application.DTOs;
+using AgencyPlatform.Core.Entities;
 using AgencyPlatform.Application.Interfaces.Services;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging;
+using AgencyPlatform.Application.Interfaces.Repositories;
 using Stripe;
+using Stripe.Checkout;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using AgencyPlatform.Application.DTOs.Payment;
 
 namespace AgencyPlatform.Infrastructure.Services
 {
@@ -14,17 +18,32 @@ namespace AgencyPlatform.Infrastructure.Services
     {
         private readonly IConfiguration _configuration;
         private readonly ILogger<StripePaymentService> _logger;
+        private readonly ITransaccionRepository _transaccionRepository;
+        private readonly ITransferenciaRepository _transferenciaRepository;
+        private readonly IAcompananteRepository _acompananteRepository;
+        private readonly IAgenciaRepository _agenciaRepository;
+        private readonly decimal _comisionAgencia = 0.20m; // 20% de comisión
 
-        public StripePaymentService(IConfiguration configuration, ILogger<StripePaymentService> logger)
+        public StripePaymentService(
+            IConfiguration configuration,
+            ILogger<StripePaymentService> logger,
+            ITransaccionRepository transaccionRepository,
+            ITransferenciaRepository transferenciaRepository,
+            IAcompananteRepository acompananteRepository,
+            IAgenciaRepository agenciaRepository)
         {
             _configuration = configuration;
             _logger = logger;
+            _transaccionRepository = transaccionRepository;
+            _transferenciaRepository = transferenciaRepository;
+            _acompananteRepository = acompananteRepository;
+            _agenciaRepository = agenciaRepository;
             StripeConfiguration.ApiKey = _configuration["Stripe:SecretKey"];
             _logger.LogInformation("StripePaymentService inicializado con API Key: {KeyFirstChar}***",
                 _configuration["Stripe:SecretKey"]?.Substring(0, 1) ?? "No configurada");
         }
 
-        public async Task<string> CreatePaymentIntent(decimal amount, string currency, string description)
+        public async Task<string> CreatePaymentIntent(decimal amount, string currency, string description, Dictionary<string, string> metadata = null)
         {
             try
             {
@@ -36,6 +55,7 @@ namespace AgencyPlatform.Infrastructure.Services
                     Amount = (long)(amount * 100), // Stripe usa centavos
                     Currency = currency,
                     Description = description,
+                    Metadata = metadata,
                     AutomaticPaymentMethods = new PaymentIntentAutomaticPaymentMethodsOptions
                     {
                         Enabled = true,
@@ -95,7 +115,6 @@ namespace AgencyPlatform.Infrastructure.Services
                 _logger.LogInformation("Creando suscripción: ClienteId={ClienteId}, MembresiaId={MembresiaId}",
                     clienteId, membresiaId);
 
-                // Crear o recuperar un cliente en Stripe
                 var customerService = new CustomerService();
                 _logger.LogDebug("Creando/recuperando cliente en Stripe para ClienteId={ClienteId}", clienteId);
 
@@ -111,7 +130,6 @@ namespace AgencyPlatform.Infrastructure.Services
 
                 _logger.LogDebug("Cliente creado en Stripe: {CustomerId}", customer.Id);
 
-                // Crear la suscripción
                 var priceId = $"price_membresia_{membresiaId}";
                 _logger.LogDebug("Usando price_id={PriceId} para la suscripción", priceId);
 
@@ -289,16 +307,14 @@ namespace AgencyPlatform.Infrastructure.Services
                 var service = new PaymentMethodService();
                 var paymentMethods = await service.ListAsync(options);
 
-               
-
                 return paymentMethods.Select(pm => new PaymentMethodDto
                 {
                     Id = pm.Id,
                     Type = pm.Type,
-                    Brand = pm.Card.Brand,
-                    Last4 = pm.Card.Last4,
-                    ExpiryMonth = pm.Card.ExpMonth,
-                    ExpiryYear = pm.Card.ExpYear
+                    Brand = pm.Card?.Brand,
+                    Last4 = pm.Card?.Last4,
+                    ExpiryMonth = pm.Card?.ExpMonth ?? 0,
+                    ExpiryYear = pm.Card?.ExpYear ?? 0
                 }).ToList();
             }
             catch (StripeException ex)
@@ -332,7 +348,6 @@ namespace AgencyPlatform.Infrastructure.Services
                 var service = new CustomerService();
                 var customer = await service.UpdateAsync(customerId, options);
 
-                // Corrigiendo la comparación con la propiedad DefaultPaymentMethod que puede ser un string
                 bool isDefault = customer.InvoiceSettings?.DefaultPaymentMethod != null &&
                                  customer.InvoiceSettings.DefaultPaymentMethod.Equals(paymentMethodId);
 
@@ -351,6 +366,420 @@ namespace AgencyPlatform.Infrastructure.Services
             {
                 _logger.LogError(ex, "Error inesperado al establecer método de pago predeterminado {PaymentMethodId} para cliente {CustomerId}",
                     paymentMethodId, customerId);
+                throw;
+            }
+        }
+
+        public async Task<string> CreateCheckoutSession(string productName, int amount, string referenceId, string successUrl, string cancelUrl)
+        {
+            try
+            {
+                _logger.LogInformation("Creando sesión de checkout: Producto={ProductName}, Monto={Amount}, ReferenceId={ReferenceId}",
+                    productName, amount, referenceId);
+
+                var options = new SessionCreateOptions
+                {
+                    PaymentMethodTypes = new List<string> { "card" },
+                    LineItems = new List<SessionLineItemOptions>
+                    {
+                        new SessionLineItemOptions
+                        {
+                            PriceData = new SessionLineItemPriceDataOptions
+                            {
+                                UnitAmount = amount,
+                                Currency = "usd",
+                                ProductData = new SessionLineItemPriceDataProductDataOptions
+                                {
+                                    Name = productName,
+                                },
+                            },
+                            Quantity = 1,
+                        }
+                    },
+                    Mode = "payment",
+                    SuccessUrl = successUrl,
+                    CancelUrl = cancelUrl,
+                    Metadata = new Dictionary<string, string>
+                    {
+                        { "referenceId", referenceId }
+                    }
+                };
+
+                var service = new SessionService();
+                var session = await service.CreateAsync(options);
+
+                _logger.LogInformation("Sesión de pago creada: ID={SessionId}", session.Id);
+                return session.Url;
+            }
+            catch (StripeException ex)
+            {
+                _logger.LogError(ex, "Error de Stripe al crear sesión de pago: {ErrorMessage}", ex.Message);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error inesperado al crear sesión de pago");
+                throw;
+            }
+        }
+
+        public async Task<transaccion> ProcesarPagoCliente(int clienteId, int acompananteId, decimal monto, string paymentMethodId)
+        {
+            try
+            {
+                _logger.LogInformation("Procesando pago de cliente ID: {ClienteId} para acompañante ID: {AcompananteId}. Monto: {Monto}", clienteId, acompananteId, monto);
+
+                var acompanante = await _acompananteRepository.GetByIdAsync(acompananteId);
+                if (acompanante == null)
+                {
+                    _logger.LogWarning("Acompañante ID: {AcompananteId} no encontrado", acompananteId);
+                    throw new InvalidOperationException("Acompañante no encontrado");
+                }
+
+                // Crear el PaymentIntent
+                var metadata = new Dictionary<string, string>
+                {
+                    { "clienteId", clienteId.ToString() },
+                    { "acompananteId", acompananteId.ToString() },
+                    { "agenciaId", acompanante.agencia_id?.ToString() ?? "N/A" }
+                };
+
+                var clientSecret = await CreatePaymentIntent(
+                    amount: monto,
+                    currency: "usd",
+                    description: $"Pago por servicio de acompañante ID: {acompananteId}",
+                    metadata: metadata
+                );
+
+                // Confirmar el pago
+                var paymentIntentId = clientSecret.Split("_secret_")[0];
+                var pagoConfirmado = await ConfirmPayment(paymentIntentId);
+
+                if (!pagoConfirmado)
+                {
+                    _logger.LogWarning("Pago fallido para cliente ID: {ClienteId}. PaymentIntentId: {PaymentIntentId}", clienteId, paymentIntentId);
+                    throw new InvalidOperationException("El pago no pudo ser procesado");
+                }
+
+                // Crear la transacción
+                var transaccion = new transaccion
+                {
+                    cliente_id = clienteId,
+                    acompanante_id = acompananteId,
+                    agencia_id = acompanante.agencia_id,
+                    monto_total = monto,
+                    monto_acompanante = acompanante.agencia_id.HasValue ? monto * (1 - _comisionAgencia) : monto,
+                    monto_agencia = acompanante.agencia_id.HasValue ? monto * _comisionAgencia : null,
+                    estado = "pendiente",
+                    proveedor_pago = "stripe",
+                    id_transaccion_externa = paymentIntentId,
+                    fecha_transaccion = DateTime.UtcNow,
+                    created_at = DateTime.UtcNow,
+                    updated_at = DateTime.UtcNow
+                };
+
+                await _transaccionRepository.AddAsync(transaccion);
+                await _transaccionRepository.SaveChangesAsync();
+
+                _logger.LogInformation("Pago procesado con éxito. Transacción ID: {TransaccionId}", transaccion.id);
+
+                // Distribuir el pago al acompañante
+                transaccion = await DistribuirPagoAAcompanante(transaccion);
+
+                return transaccion;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al procesar pago de cliente ID: {ClienteId} para acompañante ID: {AcompananteId}", clienteId, acompananteId);
+                throw;
+            }
+        }
+
+        public async Task<transaccion> DistribuirPagoAAcompanante(transaccion transaccion)
+        {
+            try
+            {
+                if (!transaccion.acompanante_id.HasValue)
+                {
+                    throw new InvalidOperationException("La transacción no tiene un acompañante asignado");
+                }
+
+                var acompanante = await _acompananteRepository.GetByIdAsync(transaccion.acompanante_id.Value);
+                if (acompanante == null)
+                {
+                    throw new InvalidOperationException("Acompañante no encontrado");
+                }
+
+                if (transaccion.agencia_id.HasValue)
+                {
+                    var transferenciaAgencia = new transferencia
+                    {
+                        transaccion_id = transaccion.id,
+                        origen_id = transaccion.cliente_id,
+                        origen_tipo = "cliente",
+                        destino_id = transaccion.agencia_id.Value,
+                        destino_tipo = "agencia",
+                        monto = transaccion.monto_agencia ?? 0,
+                        estado = "pendiente",
+                        proveedor_pago = "stripe",
+                        fecha_creacion = DateTime.UtcNow,
+                        created_at = DateTime.UtcNow,
+                        updated_at = DateTime.UtcNow
+                    };
+
+                    await _transferenciaRepository.AddAsync(transferenciaAgencia);
+                    await _transferenciaRepository.SaveChangesAsync();
+
+                    // Simular la transferencia
+                    transferenciaAgencia.id_transferencia_externa = "simulated_transfer_" + transferenciaAgencia.id;
+                    transferenciaAgencia.estado = "completado";
+                    transferenciaAgencia.fecha_procesamiento = DateTime.UtcNow;
+                    await _transferenciaRepository.UpdateAsync(transferenciaAgencia);
+                    await _transferenciaRepository.SaveChangesAsync();
+                }
+
+                var transferenciaAcompanante = new transferencia
+                {
+                    transaccion_id = transaccion.id,
+                    origen_id = transaccion.agencia_id ?? transaccion.cliente_id,
+                    origen_tipo = transaccion.agencia_id.HasValue ? "agencia" : "cliente",
+                    destino_id = transaccion.acompanante_id.Value,
+                    destino_tipo = "acompanante",
+                    monto = transaccion.monto_acompanante,
+                    estado = "pendiente",
+                    proveedor_pago = "stripe",
+                    fecha_creacion = DateTime.UtcNow,
+                    created_at = DateTime.UtcNow,
+                    updated_at = DateTime.UtcNow
+                };
+
+                await _transferenciaRepository.AddAsync(transferenciaAcompanante);
+                await _transferenciaRepository.SaveChangesAsync();
+
+                // Simular la transferencia
+                transferenciaAcompanante.id_transferencia_externa = "simulated_transfer_" + transferenciaAcompanante.id;
+                transferenciaAcompanante.estado = "completado";
+                transferenciaAcompanante.fecha_procesamiento = DateTime.UtcNow;
+                await _transferenciaRepository.UpdateAsync(transferenciaAcompanante);
+                await _transferenciaRepository.SaveChangesAsync();
+
+                transaccion.estado = "completado";
+                transaccion.fecha_procesamiento = DateTime.UtcNow;
+                transaccion.updated_at = DateTime.UtcNow;
+                await _transaccionRepository.UpdateAsync(transaccion);
+                await _transaccionRepository.SaveChangesAsync();
+
+                return transaccion;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al distribuir pago");
+                transaccion.estado = "fallido";
+                transaccion.updated_at = DateTime.UtcNow;
+                await _transaccionRepository.UpdateAsync(transaccion);
+                await _transaccionRepository.SaveChangesAsync();
+                throw;
+            }
+        }
+
+        public async Task<transaccion> DistribuirPagoAAgencia(int agenciaId, decimal monto, string paymentIntentId)
+        {
+            try
+            {
+                _logger.LogInformation("Distribuyendo pago a la agencia ID: {AgenciaId}. Monto: {Monto}, PaymentIntentId: {PaymentIntentId}", agenciaId, monto, paymentIntentId);
+
+                // Obtener la agencia
+                var agencia = await _agenciaRepository.GetByIdAsync(agenciaId);
+                if (agencia == null)
+                {
+                    _logger.LogWarning("Agencia ID: {AgenciaId} no encontrada", agenciaId);
+                    throw new InvalidOperationException("Agencia no encontrada");
+                }
+
+                // Verificar si la agencia tiene una cuenta conectada en Stripe
+                string stripeAccountId = agencia.stripe_account_id;
+                if (string.IsNullOrEmpty(stripeAccountId))
+                {
+                    _logger.LogInformation("La agencia ID: {AgenciaId} no tiene una cuenta conectada en Stripe, creando una...", agenciaId);
+                    stripeAccountId = await CreateConnectedAccountAsync(
+                        email: agencia.email ?? throw new InvalidOperationException("La agencia debe tener un email registrado"),
+                        type: "express",
+                        metadata: new Dictionary<string, string>
+                        {
+                            { "agenciaId", agenciaId.ToString() }
+                        }
+                    );
+
+                    // Actualizar la agencia con el nuevo stripe_account_id
+                    agencia.stripe_account_id = stripeAccountId;
+                    await _agenciaRepository.UpdateAsync(agencia);
+                    await _agenciaRepository.SaveChangesAsync();
+                    _logger.LogInformation("Cuenta conectada creada para agencia ID: {AgenciaId}. Stripe Account ID: {StripeAccountId}", agenciaId, stripeAccountId);
+                }
+
+                // Crear una transacción para registrar el pago
+                var transaccion = new transaccion
+                {
+                    agencia_id = agenciaId,
+                    monto_total = monto,
+                    monto_agencia = monto, // Todo el monto va a la agencia
+                    estado = "pendiente",
+                    proveedor_pago = "stripe",
+                    id_transaccion_externa = paymentIntentId,
+                    fecha_transaccion = DateTime.UtcNow,
+                    created_at = DateTime.UtcNow,
+                    updated_at = DateTime.UtcNow
+                };
+
+                await _transaccionRepository.AddAsync(transaccion);
+                await _transaccionRepository.SaveChangesAsync();
+
+                // Crear una transferencia a la cuenta conectada de la agencia usando Stripe Connect
+                var transferenciaAgencia = new transferencia
+                {
+                    transaccion_id = transaccion.id,
+                    origen_id = 0, // Plataforma como origen
+                    origen_tipo = "plataforma",
+                    destino_id = agenciaId,
+                    destino_tipo = "agencia",
+                    monto = monto,
+                    estado = "pendiente",
+                    proveedor_pago = "stripe",
+                    fecha_creacion = DateTime.UtcNow,
+                    created_at = DateTime.UtcNow,
+                    updated_at = DateTime.UtcNow
+                };
+
+                await _transferenciaRepository.AddAsync(transferenciaAgencia);
+                await _transferenciaRepository.SaveChangesAsync();
+
+                // Crear la transferencia real con Stripe Connect
+                var transferOptions = new TransferCreateOptions
+                {
+                    Amount = (long)(monto * 100), // Stripe usa centavos
+                    Currency = "usd",
+                    Destination = stripeAccountId,
+                    TransferGroup = $"verificacion_agencia_{agenciaId}_transaccion_{transaccion.id}",
+                    SourceTransaction = paymentIntentId // Vincular la transferencia al PaymentIntent
+                };
+
+                var transferService = new TransferService();
+                var transfer = await transferService.CreateAsync(transferOptions);
+
+                // Actualizar la transferencia con los datos reales
+                transferenciaAgencia.id_transferencia_externa = transfer.Id;
+                transferenciaAgencia.estado = "completado";
+                transferenciaAgencia.fecha_procesamiento = DateTime.UtcNow;
+                await _transferenciaRepository.UpdateAsync(transferenciaAgencia);
+                await _transferenciaRepository.SaveChangesAsync();
+
+                // Actualizar la transacción
+                transaccion.estado = "completado";
+                transaccion.fecha_procesamiento = DateTime.UtcNow;
+                transaccion.updated_at = DateTime.UtcNow;
+                await _transaccionRepository.UpdateAsync(transaccion);
+                await _transaccionRepository.SaveChangesAsync();
+
+                _logger.LogInformation("Pago distribuido a la agencia ID: {AgenciaId}. Transacción ID: {TransaccionId}, Transferencia ID: {TransferId}", agenciaId, transaccion.id, transfer.Id);
+                return transaccion;
+            }
+            catch (StripeException ex)
+            {
+                _logger.LogError(ex, "Error de Stripe al distribuir pago a la agencia ID: {AgenciaId}: {ErrorMessage}, Código: {ErrorCode}", agenciaId, ex.Message, ex.StripeError?.Code);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al distribuir pago a la agencia ID: {AgenciaId}", agenciaId);
+                throw;
+            }
+        }
+
+        public async Task<decimal> ObtenerSaldoAcompanante(int acompananteId)
+        {
+            try
+            {
+                _logger.LogInformation("Obteniendo saldo para acompañante ID: {AcompananteId}", acompananteId);
+                var transferencias = await _transferenciaRepository.GetByAcompananteIdAsync(acompananteId);
+                var saldo = transferencias
+                    .Where(t => t.estado == "completado" && t.destino_tipo == "acompanante")
+                    .Sum(t => t.monto);
+                _logger.LogInformation("Saldo para acompañante ID: {AcompananteId} es {Saldo}", acompananteId, saldo);
+                return saldo;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al obtener saldo para acompañante ID: {AcompananteId}", acompananteId);
+                throw;
+            }
+        }
+
+        public async Task<string> CreateConnectedAccountAsync(string email, string type, Dictionary<string, string> metadata = null)
+        {
+            try
+            {
+                _logger.LogInformation("Creando cuenta conectada de Stripe: Email={Email}, Tipo={Type}", email, type);
+
+                var options = new AccountCreateOptions
+                {
+                    Type = type,
+                    Email = email,
+                    Capabilities = new AccountCapabilitiesOptions
+                    {
+                        Transfers = new AccountCapabilitiesTransfersOptions
+                        {
+                            Requested = true,
+                        },
+                        CardPayments = new AccountCapabilitiesCardPaymentsOptions
+                        {
+                            Requested = true,
+                        },
+                    },
+                    BusinessType = type == "express" ? "individual" : "company",
+                    Metadata = metadata
+                };
+
+                var service = new AccountService();
+                var account = await service.CreateAsync(options);
+
+                _logger.LogInformation("Cuenta conectada creada: AccountId={AccountId}", account.Id);
+                return account.Id;
+            }
+            catch (StripeException ex)
+            {
+                _logger.LogError(ex, "Error al crear cuenta conectada de Stripe");
+                throw;
+            }
+        }
+
+        public async Task<string> GenerateOnboardingLinkAsync(string stripeAccountId, string returnUrl, string refreshUrl)
+        {
+            try
+            {
+                _logger.LogInformation("Generando enlace de onboarding para Stripe Account ID: {StripeAccountId}", stripeAccountId);
+
+                var options = new AccountLinkCreateOptions
+                {
+                    Account = stripeAccountId,
+                    Type = "account_onboarding",
+                    ReturnUrl = returnUrl,
+                    RefreshUrl = refreshUrl
+                };
+
+                var service = new AccountLinkService();
+                var accountLink = await service.CreateAsync(options);
+
+                _logger.LogInformation("Enlace de onboarding generado para Stripe Account ID: {StripeAccountId}. URL: {AccountLinkUrl}", stripeAccountId, accountLink.Url);
+                return accountLink.Url;
+            }
+            catch (StripeException ex)
+            {
+                _logger.LogError(ex, "Error de Stripe al generar enlace de onboarding para Stripe Account ID: {StripeAccountId}: {ErrorMessage}, Código: {ErrorCode}", stripeAccountId, ex.Message, ex.StripeError?.Code);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error inesperado al generar enlace de onboarding para Stripe Account ID: {StripeAccountId}", stripeAccountId);
                 throw;
             }
         }

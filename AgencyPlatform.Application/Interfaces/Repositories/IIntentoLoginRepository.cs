@@ -12,5 +12,8 @@ namespace AgencyPlatform.Application.Interfaces.Repositories
         Task<DateTime?> GetLastAttemptTimeAsync(string email, string ip);
         Task RegisterFailedAttemptAsync(string email, string ip);
         Task ResetFailedAttemptsAsync(string email, string ip);
+
+        Task<int> EliminarIntentosAntiguosAsync(DateTime fechaLimite);
+
     }
 }

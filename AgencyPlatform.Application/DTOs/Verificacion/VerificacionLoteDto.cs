@@ -12,5 +12,7 @@ namespace AgencyPlatform.Application.DTOs.Verificacion
         public List<int> AcompananteIds { get; set; }
         public decimal MontoCobradoUnitario { get; set; }
         public string Observaciones { get; set; }
+
+        public string MetodoPago { get; set; }
     }
 }

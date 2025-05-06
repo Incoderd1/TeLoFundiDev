@@ -10,7 +10,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 using BCrypt.Net;
-using AgencyPlatform.Application.Interfaces.Services; // Añadido para BCrypt
+using AgencyPlatform.Application.Interfaces.Services;
 using AgencyPlatform.Core.Enums;
 using AgencyPlatform.Infrastructure.Services.Email;
 using Microsoft.AspNetCore.Http;
@@ -35,7 +35,6 @@ namespace AgencyPlatform.Application.Services
         private readonly IAcompananteService _acompananteService;
         private readonly IAgenciaRepository _agenciaRepository;
 
-
         // Lista de contraseñas comunes para prevenir su uso
         private static readonly HashSet<string> CommonPasswords = new HashSet<string> {
             "password", "123456", "12345678", "qwerty", "admin", "welcome",
@@ -48,7 +47,9 @@ namespace AgencyPlatform.Application.Services
             IEmailSender emailSender,
             IHttpContextAccessor httpContextAccessor,
             ILogger<UserService> logger,
-            IIntentoLoginRepository intentoLoginRepository,IAcompananteService acompananteService, IAgenciaRepository agenciaRepository)
+            IIntentoLoginRepository intentoLoginRepository,
+            IAcompananteService acompananteService,
+            IAgenciaRepository agenciaRepository)
         {
             _userRepository = userRepository;
             _configuration = configuration;
@@ -59,6 +60,7 @@ namespace AgencyPlatform.Application.Services
             _acompananteService = acompananteService;
             _agenciaRepository = agenciaRepository;
         }
+
         public async Task<usuario> RegisterUserAsync(string email, string password, string tipoUsuario, string? phone = null)
         {
             try
@@ -288,7 +290,6 @@ namespace AgencyPlatform.Application.Services
 
                 _logger.LogInformation("Refresh token exitoso para usuario: {Email}, ID: {UserId}", user.email, user.id);
 
-                //revisar aqui
                 // Registrar el uso de refresh token
                 token.fecha_expiracion = DateTime.UtcNow;
                 await _userRepository.UpdateRefreshTokenAsync(token);
@@ -395,7 +396,6 @@ namespace AgencyPlatform.Application.Services
                 if (BCrypt.Net.BCrypt.Verify(newPassword, user.password_hash))
                     throw new ArgumentException("La nueva contraseña debe ser diferente a la actual.");
 
-                //revisar aqui
                 // Actualizar contraseña
                 user.password_hash = BCrypt.Net.BCrypt.HashPassword(newPassword);
                 resetToken.esta_usado = true;
@@ -462,7 +462,6 @@ namespace AgencyPlatform.Application.Services
             }
         }
 
-        // Método con paginación (no parte de la interfaz original, pero recomendado)
         public async Task<(List<usuario> Usuarios, int Total)> GetAllUsersPagedAsync(int pagina, int elementosPorPagina)
         {
             try
@@ -584,36 +583,95 @@ namespace AgencyPlatform.Application.Services
                 throw;
             }
         }
+
         public async Task<(usuario Usuario, int AcompananteId)> RegisterUserAcompananteAsync(
-                 string email,
-                 string password,
-                 string telefono, // Ya es igual a WhatsApp
-                 string nombrePerfil,
-                 string genero,
-                 int edad,
-                 string? descripcion = null,
-                 string? ciudad = null,
-                 string? pais = null,
-                 string? disponibilidad = "Horario flexible",
-                 decimal? tarifaBase = null,
-                 string? moneda = "USD", // Forzado a "USD"
-                 List<int>? categoriaIds = null,
-                 string? whatsapp = null, // Ya no es necesario, lo usamos como teléfono
-                 string? emailContacto = null,
-                 int altura = 160, // Default
-                 int peso = 60, // Default
-                 string idiomas = "Español" // Default
-                            )
+            string email,
+            string password,
+            string telefono,
+            string nombrePerfil,
+            string genero,
+            int edad,
+            string? descripcion = null,
+            string? ciudad = null,
+            string? pais = null,
+            string? disponibilidad = "Horario flexible",
+            decimal? tarifaBase = null,
+            string? moneda = "USD",
+            List<int>? categoriaIds = null,
+            string? whatsapp = null,
+            string? emailContacto = null,
+            int altura = 160,
+            int peso = 60,
+            string idiomas = "Español",
+            string clientIp = null)
         {
             try
             {
-                _logger.LogInformation("Iniciando registro de usuario-acompañante con email: {Email}", email);
+                _logger.LogInformation("Iniciando registro de usuario acompañante con email: {Email}, nombrePerfil: {NombrePerfil}", email, nombrePerfil);
 
-                // 1. Crear el usuario con rol "acompanante"
-                var user = await RegisterUserAsync(email, password, "acompanante", telefono);
+                // Validar si el usuario ya existe
+                var existingUser = await _userRepository.GetByEmailAsync(email);
+                if (existingUser != null)
+                {
+                    _logger.LogWarning("Email ya registrado: {Email}", email);
+                    throw new InvalidOperationException("El email ya está registrado.");
+                }
 
-                // 2. Construir el DTO de acompañante
-                var acompananteDto = new CrearAcompananteDto
+                // Validar formato de email
+                if (!IsValidEmail(email))
+                {
+                    _logger.LogWarning("Formato de email inválido: {Email}", email);
+                    throw new ArgumentException("El formato del email no es válido.");
+                }
+
+                // Validar que el dominio del email sea válido
+                if (!IsValidEmailDomain(email))
+                {
+                    _logger.LogWarning("Dominio de email inválido: {Email}", email);
+                    throw new ArgumentException("El dominio del email no es válido.");
+                }
+
+                // Validar complejidad de contraseña
+                if (!IsPasswordStrong(password))
+                {
+                    _logger.LogWarning("Contraseña no cumple con requisitos de seguridad para email: {Email}", email);
+                    throw new ArgumentException("La contraseña debe tener al menos 8 caracteres, incluyendo una letra mayúscula, una minúscula, un número y un carácter especial.");
+                }
+
+                // Verificar si es una contraseña común
+                if (IsCommonPassword(password))
+                {
+                    _logger.LogWarning("Contraseña común utilizada para email: {Email}", email);
+                    throw new ArgumentException("La contraseña es demasiado común. Por favor, elija una contraseña más segura.");
+                }
+
+                // Validar edad mínima
+                if (edad < 18)
+                {
+                    _logger.LogWarning("Edad inválida para registro de acompañante: {Edad}", edad);
+                    throw new ArgumentException("La edad debe ser mayor o igual a 18.");
+                }
+
+                // Crear el usuario
+                var usuario = new usuario
+                {
+                    email = email,
+                    password_hash = BCrypt.Net.BCrypt.HashPassword(password),
+                    rol_id = 3, // Rol de acompañante
+                    telefono = telefono,
+                    esta_activo = true,
+                    provider = "local",
+                    password_required = true,
+                    fecha_registro = DateTime.UtcNow,
+                    created_at = DateTime.UtcNow
+                };
+
+                await _userRepository.AddAsync(usuario);
+                await _userRepository.SaveChangesAsync();
+                _logger.LogInformation("Usuario creado con ID: {UserId}, email: {Email}", usuario.id, email);
+
+                // Crear el perfil de acompañante
+                var crearAcompananteDto = new CrearAcompananteDto
                 {
                     NombrePerfil = nombrePerfil,
                     Genero = genero,
@@ -621,49 +679,64 @@ namespace AgencyPlatform.Application.Services
                     Descripcion = descripcion,
                     Ciudad = ciudad,
                     Pais = pais,
-                    Disponibilidad = disponibilidad ?? "Horario flexible", // Default
+                    Disponibilidad = disponibilidad,
                     TarifaBase = tarifaBase ?? 0,
-                    Moneda = "USD", // Forzado a USD
-                    CategoriaIds = categoriaIds ?? new List<int>(), // Si no se pasa, asigna lista vacía
+                    Moneda = moneda,
+                    CategoriaIds = categoriaIds,
                     Telefono = telefono,
-                    WhatsApp = telefono, // Usamos teléfono como WhatsApp también
-                    EmailContacto = emailContacto ?? email, // Si no se pasa, usa el email
+                    WhatsApp = whatsapp,
+                    EmailContacto = emailContacto ?? email,
                     Altura = altura,
                     Peso = peso,
                     Idiomas = idiomas
                 };
 
-                // 3. Crear el perfil del acompañante
-                int acompananteId = await _acompananteService.CrearAsync(acompananteDto, user.id);
+                int acompananteId = await _acompananteService.CrearAsync(crearAcompananteDto, usuario.id, clientIp);
+                _logger.LogInformation("Perfil de acompañante creado con ID: {AcompananteId} para usuario ID: {UserId}", acompananteId, usuario.id);
 
-                _logger.LogInformation("✅ Registro exitoso. Usuario ID: {UserId}, Acompañante ID: {AcompananteId}",
-                    user.id, acompananteId);
+                // Enviar correo de bienvenida
+                await EnviarCorreoBienvenida(usuario, "acompanante");
 
-                return (user, acompananteId);
+                return (usuario, acompananteId);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "❌ Error en registro acompañante con email: {Email}", email);
+                _logger.LogError(ex, "Error al registrar usuario acompañante con email: {Email}", email);
                 throw;
             }
         }
 
-        //venir aqui
-
         public async Task NotificarAdminDeSolicitudAgenciaAsync()
         {
-            // Lógica para enviar notificación al administrador (por ejemplo, por correo)
-            var admins = await _userRepository.GetUsersByRoleAsync("admin"); // Supongamos que tenemos un repositorio para obtener usuarios por rol
-
-            foreach (var admin in admins)
+            try
             {
-                await _emailSender.SendEmailAsync(admin.email, "Nueva solicitud de agencia", "Hay una nueva solicitud pendiente de agencia.");
+                _logger.LogInformation("Notificando a administradores sobre nueva solicitud de agencia");
+
+                var admins = await _userRepository.GetUsersByRoleAsync("admin");
+                if (admins == null || !admins.Any())
+                {
+                    _logger.LogWarning("No se encontraron administradores para notificar solicitud de agencia");
+                    return;
+                }
+
+                foreach (var admin in admins)
+                {
+                    await _emailSender.SendEmailAsync(
+                        admin.email,
+                        "Nueva solicitud de agencia",
+                        "Hay una nueva solicitud pendiente de agencia que necesita tu revisión."
+                    );
+                    _logger.LogDebug("Correo de notificación enviado a admin: {AdminEmail}", admin.email);
+                }
+
+                //_logger.LogInformation("Notificación de solicitud de agencia enviada a {AdminCount} administradores", admins.Count);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al notificar a administradores sobre nueva solicitud de agencia");
+                // No relanzamos la excepción para no interrumpir el flujo
             }
         }
-
-
-
-
 
         #region Métodos Privados
 
@@ -792,6 +865,7 @@ namespace AgencyPlatform.Application.Services
                 // No re-lanzamos la excepción para no interrumpir el proceso
             }
         }
+
         private async Task EnviarCorreoCambioEmail(usuario user, string oldEmail)
         {
             try
@@ -816,8 +890,7 @@ namespace AgencyPlatform.Application.Services
                 <p>Hola <strong>{user.email}</strong>,</p>
                 <p>Tu dirección de correo electrónico ha sido cambiada de <strong>{oldEmail}</strong> a <strong>{user.email}</strong>.</p>
                 <p>Si realizaste este cambio, no necesitas hacer nada más.</p>
-                <p>Si no realizasteReintentarClaude alcanzó la longitud máxima para un mensaje y ha pausado su respuesta. Puede escribir Continuar para seguir con la conversación.CcontinuarEditarContinuando con el método para enviar correo de cambio de email:
-csharp                <p>Si no realizaste este cambio, por favor contacta inmediatamente a soporte.</p>
+                <p>Si no realizaste este cambio, por favor contacta inmediatamente a soporte.</p>
                 <p><a href='{sitioWeb}/contact' style='background:#007bff;padding:10px 15px;color:white;text-decoration:none;border-radius:4px;'>Contactar Soporte</a></p>
                 <br/>
                 <p style='font-size:12px;color:gray;'>Este es un mensaje automático, por favor no respondas.</p>";
@@ -993,15 +1066,7 @@ csharp                <p>Si no realizaste este cambio, por favor contacta inmedi
         {
             return _httpContextAccessor.HttpContext?.User?.FindFirst(ClaimTypes.Role)?.Value ?? string.Empty;
         }
-     
 
         #endregion
     }
-
 }
-
-
-
-
-
-

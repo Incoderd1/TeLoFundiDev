@@ -18,7 +18,7 @@ namespace AgencyPlatform.Infrastructure.Repositories
             _context = context;
         }
 
-        // Implementación para la interfaz IAnuncioDestacadoRepository
+        // Métodos específicos de IAnuncioDestacadoRepository
         public async Task<anuncios_destacado?> GetByIdAsync(int id)
         {
             return await _context.anuncios_destacados.FindAsync(id);
@@ -92,50 +92,121 @@ namespace AgencyPlatform.Infrastructure.Repositories
             await _context.SaveChangesAsync();
         }
 
-        // Implementación para IGenericRepository<AnuncioDestacado>
-        Task<AnuncioDestacado> IGenericRepository<AnuncioDestacado>.GetByIdAsync(int id)
+        public async Task<int> DesactivarAnunciosVencidosAsync(DateTime fecha)
         {
-            throw new NotImplementedException("Esta interfaz no se utiliza en esta implementación");
+            var anunciosVencidos = await _context.anuncios_destacados
+                .Where(a => a.esta_activo == true && a.fecha_fin < fecha)
+                .ToListAsync();
+
+            foreach (var anuncio in anunciosVencidos)
+            {
+                anuncio.esta_activo = false;
+                anuncio.updated_at = DateTime.UtcNow;
+            }
+
+            await _context.SaveChangesAsync();
+            return anunciosVencidos.Count;
         }
 
-        Task<IList<AnuncioDestacado>> IGenericRepository<AnuncioDestacado>.GetAllAsync()
+        public async Task<int> ActivarAnunciosProgramadosAsync(DateTime fecha)
         {
-            throw new NotImplementedException("Esta interfaz no se utiliza en esta implementación");
+            var anunciosProgramados = await _context.anuncios_destacados
+                .Where(a => a.esta_activo == false &&
+                           a.fecha_inicio <= fecha &&
+                           a.fecha_fin > fecha)
+                .ToListAsync();
+
+            foreach (var anuncio in anunciosProgramados)
+            {
+                anuncio.esta_activo = true;
+                anuncio.updated_at = DateTime.UtcNow;
+            }
+
+            await _context.SaveChangesAsync();
+            return anunciosProgramados.Count;
         }
 
-        Task<IList<AnuncioDestacado>> IGenericRepository<AnuncioDestacado>.FindAsync(Expression<Func<AnuncioDestacado, bool>> predicate)
+        public async Task<bool> TieneAnuncioActivoAsync(int acompananteId)
         {
-            throw new NotImplementedException("Esta interfaz no se utiliza en esta implementación");
+            return await _context.anuncios_destacados
+                .AnyAsync(a => a.acompanante_id == acompananteId &&
+                            a.esta_activo == true &&
+                            a.fecha_fin > DateTime.UtcNow);
         }
 
-        Task<AnuncioDestacado> IGenericRepository<AnuncioDestacado>.SingleOrDefaultAsync(Expression<Func<AnuncioDestacado, bool>> predicate)
+        public async Task<List<anuncios_destacado>> GetAnunciosDestacadosByAgenciaIdAsync(int agenciaId)
         {
-            throw new NotImplementedException("Esta interfaz no se utiliza en esta implementación");
+            return await _context.anuncios_destacados
+                .Include(a => a.acompanante)
+                .Where(a => a.acompanante.agencia_id == agenciaId)
+                .ToListAsync();
         }
 
-        Task IGenericRepository<AnuncioDestacado>.AddAsync(AnuncioDestacado entity)
+        public async Task<List<anuncios_destacado>> GetActivosPorTipoYFechasAsync(string tipo, DateTime fechaInicio, DateTime fechaFin)
         {
-            throw new NotImplementedException("Esta interfaz no se utiliza en esta implementación");
+            return await _context.anuncios_destacados
+                .Where(a => a.tipo == tipo
+                         && a.esta_activo == true
+                         && a.fecha_inicio < fechaFin
+                         && a.fecha_fin > fechaInicio)
+                .ToListAsync();
         }
 
-        Task IGenericRepository<AnuncioDestacado>.AddRangeAsync(IEnumerable<AnuncioDestacado> entities)
+        public async Task<anuncios_destacado> GetByReferenceIdAsync(string referenceId)
         {
-            throw new NotImplementedException("Esta interfaz no se utiliza en esta implementación");
+            return await _context.anuncios_destacados
+                .FirstOrDefaultAsync(a => a.payment_reference == referenceId);
         }
 
-        Task IGenericRepository<AnuncioDestacado>.UpdateAsync(AnuncioDestacado entity)
+        // Implementación de los métodos de IGenericRepository<anuncios_destacado>
+        async Task<anuncios_destacado> IGenericRepository<anuncios_destacado>.GetByIdAsync(int id)
         {
-            throw new NotImplementedException("Esta interfaz no se utiliza en esta implementación");
+            return await GetByIdAsync(id);
         }
 
-        Task IGenericRepository<AnuncioDestacado>.DeleteAsync(AnuncioDestacado entity)
+        async Task<IList<anuncios_destacado>> IGenericRepository<anuncios_destacado>.GetAllAsync()
         {
-            throw new NotImplementedException("Esta interfaz no se utiliza en esta implementación");
+            return await GetAllAsync();
         }
 
-        Task IGenericRepository<AnuncioDestacado>.DeleteRangeAsync(IEnumerable<AnuncioDestacado> entities)
+        async Task<IList<anuncios_destacado>> IGenericRepository<anuncios_destacado>.FindAsync(Expression<Func<anuncios_destacado, bool>> predicate)
         {
-            throw new NotImplementedException("Esta interfaz no se utiliza en esta implementación");
+            return await _context.anuncios_destacados
+                .Where(predicate)
+                .ToListAsync();
+        }
+
+        async Task<anuncios_destacado> IGenericRepository<anuncios_destacado>.SingleOrDefaultAsync(Expression<Func<anuncios_destacado, bool>> predicate)
+        {
+            return await _context.anuncios_destacados
+                .SingleOrDefaultAsync(predicate);
+        }
+
+        async Task IGenericRepository<anuncios_destacado>.AddAsync(anuncios_destacado entity)
+        {
+            await AddAsync(entity);
+        }
+
+        async Task IGenericRepository<anuncios_destacado>.AddRangeAsync(IEnumerable<anuncios_destacado> entities)
+        {
+            await _context.anuncios_destacados.AddRangeAsync(entities);
+            await SaveChangesAsync();
+        }
+
+        async Task IGenericRepository<anuncios_destacado>.UpdateAsync(anuncios_destacado entity)
+        {
+            await UpdateAsync(entity);
+        }
+
+        async Task IGenericRepository<anuncios_destacado>.DeleteAsync(anuncios_destacado entity)
+        {
+            await DeleteAsync(entity);
+        }
+
+        async Task IGenericRepository<anuncios_destacado>.DeleteRangeAsync(IEnumerable<anuncios_destacado> entities)
+        {
+            _context.anuncios_destacados.RemoveRange(entities);
+            await SaveChangesAsync();
         }
     }
 }

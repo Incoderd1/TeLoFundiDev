@@ -1,59 +1,73 @@
-﻿using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Tokens;
-using System.Text;
+﻿using AgencyPlatform.API.Hubs;
+using AgencyPlatform.API.Utils;
+using AgencyPlatform.Application.Authorization.Requirements;
+using AgencyPlatform.Application.Configuration;
+using AgencyPlatform.Application.DTOs;
+using AgencyPlatform.Application.DTOs.Cliente;
+using AgencyPlatform.Application.DTOs.Payments;
 using AgencyPlatform.Application.Interfaces;
 using AgencyPlatform.Application.Interfaces.Repositories;
+using AgencyPlatform.Application.Interfaces.Repositories.Archivos;
+using AgencyPlatform.Application.Interfaces.ScheduledTasks;
+using AgencyPlatform.Application.Interfaces.Services;
+using AgencyPlatform.Application.Interfaces.Services.Acompanantes;
+using AgencyPlatform.Application.Interfaces.Services.AdvancedSearch;
+using AgencyPlatform.Application.Interfaces.Services.Agencias;
+using AgencyPlatform.Application.Interfaces.Services.BackgroundJob;
+using AgencyPlatform.Application.Interfaces.Services.Categoria;
+using AgencyPlatform.Application.Interfaces.Services.Cliente;
+using AgencyPlatform.Application.Interfaces.Services.ClienteCache;
+using AgencyPlatform.Application.Interfaces.Services.Cupones;
+using AgencyPlatform.Application.Interfaces.Services.EmailAgencia;
+using AgencyPlatform.Application.Interfaces.Services.FileStorage;
+using AgencyPlatform.Application.Interfaces.Services.Foto;
+using AgencyPlatform.Application.Interfaces.Services.Geocalizacion;
+using AgencyPlatform.Application.Interfaces.Services.Notificaciones;
+using AgencyPlatform.Application.Interfaces.Services.PagoVerificacion;
+using AgencyPlatform.Application.Interfaces.Services.Recommendation;
+using AgencyPlatform.Application.Interfaces.Utils;
+using AgencyPlatform.Application.MapperProfiles;
+using AgencyPlatform.Application.Middleware;
+using AgencyPlatform.Application.Services;
+using AgencyPlatform.Application.Validators;
+using AgencyPlatform.Core.Entities;
+using AgencyPlatform.Infrastructure.Authorization;
+using AgencyPlatform.Infrastructure.Extensions;
+using AgencyPlatform.Infrastructure.Mappers;
 using AgencyPlatform.Infrastructure.Repositories;
-using Microsoft.EntityFrameworkCore;
+using AgencyPlatform.Infrastructure.Services;
+using AgencyPlatform.Infrastructure.Services.Acompanantes;
+using AgencyPlatform.Infrastructure.Services.AdvancedSearch;
+using AgencyPlatform.Infrastructure.Services.Agencias;
+using AgencyPlatform.Infrastructure.Services.BackgroundJobs;
+using AgencyPlatform.Infrastructure.Services.Categoria;
+using AgencyPlatform.Infrastructure.Services.Cliente;
+using AgencyPlatform.Infrastructure.Services.ClienteCache;
+using AgencyPlatform.Infrastructure.Services.Cupones;
+using AgencyPlatform.Infrastructure.Services.Email;
+using AgencyPlatform.Infrastructure.Services.EmailProfecional;
+using AgencyPlatform.Infrastructure.Services.FileStorage;
+using AgencyPlatform.Infrastructure.Services.Foto;
+using AgencyPlatform.Infrastructure.Services.Geocalizacion;
+using AgencyPlatform.Infrastructure.Services.Notificaciones;
+using AgencyPlatform.Infrastructure.Services.PagoVerificacion;
+using AgencyPlatform.Infrastructure.Services.Payments;
+using AgencyPlatform.Infrastructure.Services.Puntos;
+using AgencyPlatform.Infrastructure.Services.Recommendation;
+using AgencyPlatform.Infrastructure.Services.Storage;
+using AgencyPlatform.Infrastructure.Services.Usuarios;
 using FluentValidation;
 using FluentValidation.AspNetCore;
-using AgencyPlatform.Application.Interfaces.Services;
-using AgencyPlatform.Core.Entities;
-using AgencyPlatform.Application.Services;
-using AgencyPlatform.Infrastructure.Services.Email;
-using Microsoft.OpenApi.Models;
-using AgencyPlatform.Application.Middleware;
-using AgencyPlatform.Application.MapperProfiles;
-using AgencyPlatform.Application.Interfaces.Services.Agencias;
-using AgencyPlatform.Infrastructure.Mappers;
-using AgencyPlatform.Infrastructure.Services.Agencias;
-using AgencyPlatform.Application.Interfaces.Services.Acompanantes;
-using AgencyPlatform.Infrastructure.Services.Acompanantes;
-using AgencyPlatform.Application.Interfaces.Services.Categoria;
-using AgencyPlatform.Infrastructure.Services.Categoria;
-using AgencyPlatform.Application.Interfaces.Repositories.Archivos;
-using AgencyPlatform.Application.DTOs;
-using AgencyPlatform.Application.Authorization.Requirements;
-using AgencyPlatform.Infrastructure.Authorization;
+using Hangfire;
+using Hangfire.PostgreSql;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
-using QuestPDF.Infrastructure;
-using AgencyPlatform.API.Hubs;
-using AgencyPlatform.API.Utils;
-using AgencyPlatform.Application.Interfaces.Utils;
-using AgencyPlatform.Application.Interfaces.Services.PagoVerificacion;
-using AgencyPlatform.Infrastructure.Services.PagoVerificacion;
-using AgencyPlatform.Infrastructure.Services;
-using AgencyPlatform.Application.Interfaces.Services.Notificaciones;
-using AgencyPlatform.Infrastructure.Services.Notificaciones;
-using AgencyPlatform.Application.Interfaces.Services.Foto;
-using AgencyPlatform.Infrastructure.Services.Foto;
-using AgencyPlatform.Infrastructure.Services.Storage;
-using AgencyPlatform.Application.Interfaces.Services.FileStorage;
-using AgencyPlatform.Infrastructure.Services.FileStorage;
-using AgencyPlatform.Application.Interfaces.Services.Cliente;
-using AgencyPlatform.Infrastructure.Services.Cliente;
-using AgencyPlatform.Application.DTOs.Payments;
-using AgencyPlatform.Infrastructure.Services.Payments;
-using AgencyPlatform.Application.Configuration;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using AgencyPlatform.Infrastructure.Services.Puntos;
-using AgencyPlatform.Application.DTOs.Cliente;
-using AgencyPlatform.Application.Interfaces.Services.ClienteCache;
-using AgencyPlatform.Application.Validators;
-using AgencyPlatform.Infrastructure.Services.ClienteCache;
-using AgencyPlatform.Application.Interfaces.Services.Recommendation;
-using AgencyPlatform.Infrastructure.Services.Recommendation;
-using AgencyPlatform.Infrastructure.Services.Usuarios;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
+using QuestPDF.Infrastructure;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 QuestPDF.Settings.License = LicenseType.Community;
@@ -63,6 +77,9 @@ QuestPDF.Settings.License = LicenseType.Community;
 var jwtSettings = builder.Configuration.GetSection("Jwt");
 
 // 📂 Configurar DbContext PostgreSQL
+
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+
 builder.Services.AddDbContext<AgencyPlatformDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
@@ -135,6 +152,35 @@ builder.Services.AddFluentValidationClientsideAdapters();
 builder.Services.AddAutoMapper(typeof(AgenciasProfile).Assembly);
 builder.Services.AddAutoMapper(typeof(MappingProfile));
 
+builder.Services.AddAutoMapper(typeof(SearchMappingProfile).Assembly);
+builder.Services.AddAutoMapper(typeof(PagosMappingProfile).Assembly);
+
+
+
+
+//builder.Services.AddAutoMapper(cfg =>
+//{
+//    cfg.AddProfile<SearchMappingProfile>();
+
+//});
+builder.Services.AddHangfire(config => config
+    .SetDataCompatibilityLevel(CompatibilityLevel.Version_170)
+    .UseSimpleAssemblyNameTypeSerializer()
+    .UseRecommendedSerializerSettings()
+    .UsePostgreSqlStorage(connectionString, new PostgreSqlStorageOptions
+    {
+        QueuePollInterval = TimeSpan.FromSeconds(15)
+    })
+    .UseFilter(new AutomaticRetryAttribute
+    {
+        Attempts = 3,
+        DelaysInSeconds = new[] { 60, 300, 600 } // 1min, 5min, 10min
+    }));
+
+GlobalJobFilters.Filters.Add(new LogFailureAttribute(builder.Services.BuildServiceProvider().GetRequiredService<ILogger<LogFailureAttribute>>()));
+
+
+
 // Registrar repositorios
 builder.Services.AddScoped<IAgenciaRepository, AgenciaRepository>();
 builder.Services.AddScoped<IAcompananteRepository, AcompananteRepository>();
@@ -178,6 +224,15 @@ builder.Services.AddScoped<IPaqueteCuponRepository, PaqueteCuponRepository>();
 builder.Services.AddScoped<ICompraRepository, CompraRepository>();
 builder.Services.AddScoped<IMembresiaVipRepository, MembresiaVipRepository>();
 builder.Services.AddScoped<ISuscripcionVipRepository, SuscripcionVipRepository>();
+builder.Services.AddScoped<IBusquedaRepository, BusquedaRepository>();
+builder.Services.AddScoped<IAdvancedSearchService, AdvancedSearchService>();
+builder.Services.AddHttpClient("GeoCoding");
+builder.Services.AddScoped<IGeocodingService, GeocodingService>();
+builder.Services.AddScoped<IPaqueteCuponService, PaqueteCuponService>();
+builder.Services.AddScoped<IEmailProfesionalService, EmailProfesionalService>();
+
+builder.Services.AddScoped<ITransaccionRepository, TransaccionRepository>();
+builder.Services.AddScoped<ITransferenciaRepository, TransferenciaRepository>();
 
 
 
@@ -219,7 +274,9 @@ builder.Services.AddScoped<AgencyPlatform.Application.Validators.IValidator<Regi
 //builder.Services.AddHostedService<ExpiryHostedService>();
 
 
-
+builder.Services.AddSingleton<IBackgroundJobService, HangfireBackgroundJobService>();
+builder.Services.AddScoped<IScheduledTasksService, ScheduledTasksService>();
+builder.Services.AddHangfireServices(builder.Configuration);
 
 
 
@@ -336,6 +393,8 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 app.UseMiddleware<ApiExceptionMiddleware>();
+app.UseHangfireDashboard(builder.Configuration);
+app.InitializeRecurringJobs();
 
 app.UseStaticFiles();
 app.UseCors("FrontendDev");

@@ -70,6 +70,23 @@ namespace AgencyPlatform.Infrastructure.Repositories
                 await _context.SaveChangesAsync();
             }
         }
+        // En IntentoLoginRepository.cs
+        public async Task<int> EliminarIntentosAntiguosAsync(DateTime fechaLimite)
+        {
+            // Obtener intentos anteriores a la fecha límite
+            var intentosAntiguos = await _context.intentos_login
+                .Where(i => i.created_at < fechaLimite)
+                .ToListAsync();
+
+            // Eliminar los intentos encontrados
+            if (intentosAntiguos.Any())
+            {
+                _context.intentos_login.RemoveRange(intentosAntiguos);
+                await _context.SaveChangesAsync();
+            }
+
+            return intentosAntiguos.Count;
+        }
     }
 
 }

@@ -18,6 +18,10 @@ namespace AgencyPlatform.Application.Interfaces.Repositories
 
         //nuevos
         Task<List<cupones_cliente>> GetExpiradosAsync(DateTime now);
+        Task<int> EliminarCuponesVencidosNoUsadosAsync(DateTime fecha);
+
+        Task<cupones_cliente> GetByIdAsync(int id); // Añadir este método
+
 
     }
 }

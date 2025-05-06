@@ -109,5 +109,10 @@ namespace AgencyPlatform.Infrastructure.Repositories
         {
             await _context.SaveChangesAsync();
         }
+
+        public Task<List<dynamic>> GetCategoriasConCoincidenciaAsync(string searchTerm, int limit)
+        {
+            throw new NotImplementedException();
+        }
     }
 }

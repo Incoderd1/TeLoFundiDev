@@ -17,5 +17,6 @@ namespace AgencyPlatform.Application.DTOs.Anuncios
         public decimal MontoPagado { get; set; }
         public int? CuponId { get; set; }
         public bool EstaActivo { get; set; }
+        public string CheckoutUrl { get; set; }
     }
 }

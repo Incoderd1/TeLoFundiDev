@@ -1,4 +1,5 @@
-﻿using AgencyPlatform.Application.DTOs.SolicitudesRegistroAgencia;
+﻿using AgencyPlatform.Application.DTOs.Solicitudes;
+using AgencyPlatform.Application.DTOs.SolicitudesRegistroAgencia;
 using AgencyPlatform.Application.Interfaces.Services.Agencias;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -106,9 +107,6 @@ namespace AgencyPlatform.API.Controllers
             }
         }
     }
-    public class RechazarSolicitudRequest
-    {
-        public string Motivo { get; set; }
-    }
+  
 }
 

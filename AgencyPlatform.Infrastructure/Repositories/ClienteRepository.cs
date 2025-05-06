@@ -1,6 +1,7 @@
 ﻿using AgencyPlatform.Application.Interfaces.Repositories;
 using AgencyPlatform.Core.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using System;
 using System.Threading.Tasks;
 
@@ -9,10 +10,13 @@ namespace AgencyPlatform.Infrastructure.Repositories
     public class ClienteRepository : IClienteRepository
     {
         private readonly AgencyPlatformDbContext _context;
+        private readonly ILogger<ClienteRepository> _logger;
 
-        public ClienteRepository(AgencyPlatformDbContext context)
+        public ClienteRepository(AgencyPlatformDbContext context, ILogger<ClienteRepository> logger)
         {
             _context = context ?? throw new ArgumentNullException(nameof(context));
+            _logger = logger;
+
         }
 
         public async Task<cliente> GetByIdAsync(int id)
@@ -63,7 +67,9 @@ namespace AgencyPlatform.Infrastructure.Repositories
         {
             var cambios = await _context.SaveChangesAsync();
             if (cambios <= 0)
-                throw new InvalidOperationException("No se guardaron los cambios en ClienteRepository");
+            {
+                _logger.LogDebug("No se realizaron cambios en ClienteRepository");
+            }
             return true;
         }
     }

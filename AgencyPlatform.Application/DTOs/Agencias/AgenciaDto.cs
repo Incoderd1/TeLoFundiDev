@@ -17,6 +17,8 @@ namespace AgencyPlatform.Application.DTOs.Agencias
         public string? Direccion { get; set; }
         public string? Ciudad { get; set; }
         public string? Pais { get; set; }
+        public string StripeAccountId { get; set; }
+
         public bool? EstaVerificada { get; set; }
         public DateTime? FechaVerificacion { get; set; }
         public decimal? ComisionPorcentaje { get; set; }  // Agregar esta propiedad

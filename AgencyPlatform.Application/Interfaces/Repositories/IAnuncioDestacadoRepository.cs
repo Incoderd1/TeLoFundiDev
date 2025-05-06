@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 namespace AgencyPlatform.Application.Interfaces.Repositories
 {
-    public interface IAnuncioDestacadoRepository :  IGenericRepository<AnuncioDestacado>
+    public interface IAnuncioDestacadoRepository :  IGenericRepository<anuncios_destacado>
     {
         Task<List<anuncios_destacado>> GetAllAsync();
         Task<anuncios_destacado?> GetByIdAsync(int id);
@@ -20,5 +20,22 @@ namespace AgencyPlatform.Application.Interfaces.Repositories
         Task SaveChangesAsync();
 
         Task<int> CountActivosByAgenciaIdAsync(int agenciaId);
+
+
+        //nuevas
+        Task<int> DesactivarAnunciosVencidosAsync(DateTime fecha);
+        Task<int> ActivarAnunciosProgramadosAsync(DateTime fecha);
+        Task<bool> TieneAnuncioActivoAsync(int acompananteId);
+
+        
+        Task<List<anuncios_destacado>> GetActivosPorTipoYFechasAsync(string tipo, DateTime fechaInicio, DateTime fechaFin);
+        Task<List<anuncios_destacado>> GetAnunciosDestacadosByAgenciaIdAsync(int agenciaId);
+
+        Task<anuncios_destacado> GetByReferenceIdAsync(string referenceId); // Nuevo método
+
+
+
+
+      
     }
 }

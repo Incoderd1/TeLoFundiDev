@@ -37,6 +37,7 @@ public partial class agencia
     public int puntos_gastados { get; set; }
     public int puntos_acumulados { get; set; }
 
+    public string? stripe_account_id { get; set; } 
 
 
 

@@ -20,6 +20,8 @@ namespace AgencyPlatform.Application.Interfaces.Services.Agencias
 {
     public interface IAgenciaService
     {
+        Task<SolicitudAgenciaDto> GetSolicitudByIdAsync(int solicitudId); // Método añadido
+
         Task<List<AgenciaDto>> GetAllAsync();
         Task<AgenciaDto?> GetByIdAsync(int id);
         Task<AgenciaDto?> GetByUsuarioIdAsync(int usuarioId);
@@ -101,6 +103,14 @@ namespace AgencyPlatform.Application.Interfaces.Services.Agencias
 
          Task CompletarPerfilAgenciaAsync(CompletarPerfilAgenciaDto dto);
 
+        Task<bool> InvitarAcompananteAsync(int acompananteId);
+
+        Task<int> GetAgenciaIdByAcompananteIdAsync(int acompananteId);
+
+
+        Task<AnuncioDestacadoDto> GetAnuncioByReferenceIdAsync(string referenceId);
+        Task UpdateAnuncioAsync(AnuncioDestacadoDto anuncio);
+        Task<bool> ConfirmarPagoVerificacionAsync(int pagoId, string referenciaPago);
 
 
     }

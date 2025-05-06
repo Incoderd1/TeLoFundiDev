@@ -55,6 +55,8 @@ namespace AgencyPlatform.Application.Interfaces.Repositories
         Task<List<movimientos_puntos_agencia>> GetUltimosMovimientosPuntosAsync(int agenciaId, int cantidad = 10);
 
 
+      
+
 
     }
 }

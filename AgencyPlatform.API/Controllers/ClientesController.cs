@@ -164,35 +164,7 @@ namespace AgencyPlatform.API.Controllers
             }
         }
 
-        /// <summary>
-        /// Usa un cupón del cliente
-        /// </summary>
-        [HttpPost("{id}/cupones/{codigo}/usar")]
-        [Authorize]
-        [ProducesResponseType(typeof(bool), (int)HttpStatusCode.OK)]
-        [ProducesResponseType(typeof(ProblemDetails), (int)HttpStatusCode.NotFound)]
-        [ProducesResponseType(typeof(ProblemDetails), (int)HttpStatusCode.BadRequest)]
-        [ProducesResponseType(typeof(ProblemDetails), (int)HttpStatusCode.Forbidden)]
-        public async Task<IActionResult> UsarCupon(int id, string codigo)
-        {
-            try
-            {
-                var resultado = await _clienteService.UsarCuponAsync(id, codigo);
-                return Ok(resultado);
-            }
-            catch (NotFoundException ex)
-            {
-                return NotFound(new ProblemDetails { Detail = ex.Message });
-            }
-            catch (BusinessRuleViolationException ex)
-            {
-                return BadRequest(new ProblemDetails { Detail = ex.Message });
-            }
-            catch (AccessDeniedException ex)
-            {
-                return StatusCode((int)HttpStatusCode.Forbidden, new ProblemDetails { Detail = ex.Message });
-            }
-        }
+       
 
         /// <summary>
         /// Compra un paquete de cupones

@@ -28,25 +28,26 @@ namespace AgencyPlatform.Application.Interfaces.Services
         // Nuevo método para registro combinado de usuario y acompañante
         // Nuevo método para registro combinado de usuario y acompañante
         Task<(usuario Usuario, int AcompananteId)> RegisterUserAcompananteAsync(
-        string email,
-        string password,
-        string telefono,            // ← viene desde el mismo WhatsApp
-        string nombrePerfil,
-        string genero,
-        int edad,
-        string? descripcion = null,
-        string? ciudad = null,
-        string? pais = null,
-        string? disponibilidad = "Horario flexible",
-        decimal? tarifaBase = null,
-        string? moneda = "USD",               // oculto, siempre "USD"
-        List<int>? categoriaIds = null,
-        string? whatsapp = null,
-        string? emailContacto = null,
-        int altura = 160,                     // oculto, fijo
-        int peso = 60,                        // oculto, fijo
-        string idiomas = "Español"           // oculto, fijo
-    );
+            string email,
+            string password,
+            string telefono,
+            string nombrePerfil,
+            string genero,
+            int edad,
+            string? descripcion = null,
+            string? ciudad = null,
+            string? pais = null,
+            string? disponibilidad = "Horario flexible",
+            decimal? tarifaBase = null,
+            string? moneda = "USD",
+            List<int>? categoriaIds = null,
+            string? whatsapp = null,
+            string? emailContacto = null,
+            int altura = 160,
+            int peso = 60,
+            string idiomas = "Español",
+            string clientIp = null);  // oculto, fijo
+    
 
     }
 }

@@ -13,15 +13,22 @@ using AgencyPlatform.Application.Interfaces;
 using AgencyPlatform.Application.Interfaces.Repositories;
 using AgencyPlatform.Application.Interfaces.Services;
 using AgencyPlatform.Application.Interfaces.Services.Agencias;
+using AgencyPlatform.Application.Interfaces.Services.Cliente;
+using AgencyPlatform.Application.Interfaces.Services.EmailAgencia;
 using AgencyPlatform.Application.Interfaces.Services.Notificaciones;
 using AgencyPlatform.Application.Interfaces.Utils;
 using AgencyPlatform.Core.Entities;
+using AgencyPlatform.Core.Enums;
+using AgencyPlatform.Infrastructure.Repositories;
 using AgencyPlatform.Shared.EmailTemplates;
 using AgencyPlatform.Shared.Exceptions;
 using AutoMapper;
 using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Security.Claims;
+using System.Transactions;
 
 namespace AgencyPlatform.Infrastructure.Services.Agencias
 {
@@ -39,10 +46,20 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
         private readonly IEmailSender _emailSender;
         private readonly INotificadorRealTime _notificador;
         private readonly ILogger<AgenciaService> _logger;
-        private readonly IUserService _userService; // Añadir este servicio
+        private readonly IUserService _userService;
         private readonly ISolicitudRegistroAgenciaRepository _solicitudRegistroAgenciaRepository;
         private readonly IPagoVerificacionRepository _pagoVerificacionRepository;
         private readonly INotificacionService _notificacionService;
+        private readonly IEmailProfesionalService _emailProfesionalService;
+        private readonly ICuponClienteRepository _cuponRepository;
+        private readonly IPaqueteCuponRepository _paqueteRepository;
+        private readonly IClienteService _clienteService;
+        private readonly IClienteRepository _clienteRepository;
+        private readonly IConfiguration _configuration;
+        private readonly IPaymentService _paymentService;
+
+
+        private readonly List<TipoAnuncioCosto> _costos;
 
         public AgenciaService(
             IAgenciaRepository agenciaRepository,
@@ -54,13 +71,20 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
             ISolicitudAgenciaRepository solicitudAgenciaRepository,
             IComisionRepository comision,
             IUserRepository usuarioRepository,
-             IEmailSender  emailSender,
-             INotificadorRealTime notificador,
-             ILogger<AgenciaService> logger,
-             IUserService userService,
-             ISolicitudRegistroAgenciaRepository solicitudRegistroAgenciaRepository,
-             IPagoVerificacionRepository pagoVerificacionRepository,
-             INotificacionService notificacionService)
+            IEmailSender emailSender,
+            INotificadorRealTime notificador,
+            ILogger<AgenciaService> logger,
+            IUserService userService,
+            ISolicitudRegistroAgenciaRepository solicitudRegistroAgenciaRepository,
+            IPagoVerificacionRepository pagoVerificacionRepository,
+            INotificacionService notificacionService,
+            IEmailProfesionalService emailProfesionalService,
+            ICuponClienteRepository cuponRepository,
+            IPaqueteCuponRepository paqueteRepository,
+            IClienteService clienteService,
+            IClienteRepository clienteRepository,
+            IConfiguration configuration,
+            IPaymentService paymentService)
         {
             _agenciaRepository = agenciaRepository;
             _acompananteRepository = acompananteRepository;
@@ -78,6 +102,38 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
             _solicitudRegistroAgenciaRepository = solicitudRegistroAgenciaRepository;
             _pagoVerificacionRepository = pagoVerificacionRepository;
             _notificacionService = notificacionService;
+            _emailProfesionalService = emailProfesionalService;
+            _cuponRepository = cuponRepository;
+            _paqueteRepository = paqueteRepository;
+            _clienteService = clienteService;
+            _clienteRepository = clienteRepository;
+            _configuration = configuration;
+            _paymentService = paymentService;
+
+            // Cargar los costos desde appsettings.json
+            _costos = new List<TipoAnuncioCosto>();
+            var costosConfig = _configuration.GetSection("AnuncioCostos").Get<List<TipoAnuncioCostoConfig>>();
+            if (costosConfig == null || !costosConfig.Any())
+            {
+                throw new InvalidOperationException("No se encontraron costos de anuncios configurados en appsettings.json.");
+            }
+
+            foreach (var costo in costosConfig)
+            {
+                if (Enum.TryParse<TipoAnuncio>(costo.Tipo, true, out var tipoAnuncio))
+                {
+                    _costos.Add(new TipoAnuncioCosto
+                    {
+                        Tipo = tipoAnuncio,
+                        Duracion = costo.Duracion,
+                        Costo = costo.Costo
+                    });
+                }
+                else
+                {
+                    _logger.LogWarning("Tipo de anuncio no válido en la configuración: {Tipo}", costo.Tipo);
+                }
+            }
         }
 
         public async Task<List<AgenciaDto>> GetAllAsync()
@@ -102,11 +158,12 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
         {
             var nueva = _mapper.Map<agencia>(nuevaAgenciaDto);
             nueva.usuario_id = ObtenerUsuarioId();
-            nueva.esta_verificada = false; 
+            nueva.esta_verificada = false;
 
             await _agenciaRepository.AddAsync(nueva);
             await _agenciaRepository.SaveChangesAsync();
         }
+
         public async Task<agencia> CrearPendienteAsync(CrearSolicitudRegistroAgenciaDto dto)
         {
             var agencia = new agencia
@@ -114,8 +171,8 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
                 nombre = dto.Nombre,
                 email = dto.Email,
                 descripcion = dto.Descripcion ?? string.Empty,
-                logo_url = string.Empty, // No existe en el DTO, asignar vacío
-                sitio_web = string.Empty, // No existe en el DTO, asignar vacío
+                logo_url = string.Empty,
+                sitio_web = string.Empty,
                 direccion = dto.Direccion ?? string.Empty,
                 ciudad = dto.Ciudad ?? string.Empty,
                 pais = dto.Pais ?? string.Empty,
@@ -129,7 +186,6 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
 
             return agencia;
         }
-
 
         public async Task<int> SolicitarRegistroAgenciaAsync(CrearSolicitudRegistroAgenciaDto dto)
         {
@@ -151,13 +207,10 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
             await _solicitudRegistroAgenciaRepository.AddAsync(solicitudAgencia);
             await _solicitudRegistroAgenciaRepository.SaveChangesAsync();
 
-            // Notificar por SignalR a todos los usuarios con rol de administrador
             await _notificacionService.NotificarPorSignalR(0, $"Nueva solicitud de agencia (ID: {solicitudAgencia.id}) pendiente", "info");
 
-            // Obtener correos de todos los administradores
             var admins = await _usuarioRepository.GetUsersByRoleAsync("admin");
 
-            // Notificar por email a todos los administradores
             foreach (var admin in admins)
             {
                 if (!string.IsNullOrEmpty(admin.email))
@@ -182,6 +235,18 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
         {
             return Uri.TryCreate(url, UriKind.Absolute, out _);
         }
+
+        public async Task<int> GetAgenciaIdByAcompananteIdAsync(int acompananteId)
+        {
+            var acompanante = await _acompananteRepository.GetByIdAsync(acompananteId);
+            if (acompanante == null)
+            {
+                _logger.LogWarning("Acompañante con ID: {AcompananteId} no encontrado", acompananteId);
+                return 0;
+            }
+            return acompanante.agencia_id ?? 0;
+        }
+
         public async Task<List<SolicitudRegistroAgenciaDto>> GetSolicitudesRegistroPendientesAsync()
         {
             try
@@ -205,7 +270,6 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
                     throw;
                 }
 
-                // Mapeo manual con protección contra NULL
                 _logger.LogInformation("Iniciando mapeo manual de solicitudes a DTOs");
                 var dtos = new List<SolicitudRegistroAgenciaDto>();
 
@@ -238,7 +302,6 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
                     catch (Exception ex)
                     {
                         _logger.LogError(ex, $"Error al mapear solicitud ID: {solicitud.id}");
-                        // Continuar con la siguiente solicitud en lugar de fallar todo el proceso
                     }
                 }
 
@@ -251,6 +314,7 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
                 throw;
             }
         }
+
         public async Task<bool> AprobarSolicitudRegistroAgenciaAsync(int solicitudId)
         {
             if (!EsAdmin())
@@ -264,11 +328,10 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
             if (solicitud.estado != "pendiente")
                 throw new Exception("Esta solicitud ya ha sido procesada.");
 
-            // 1. Crear el usuario con rol de agencia
             var user = new usuario
             {
                 email = solicitud.email,
-                password_hash = solicitud.password_hash, // Ya está hasheada
+                password_hash = solicitud.password_hash,
                 rol_id = await _usuarioRepository.GetRoleIdByNameAsync("agencia"),
                 esta_activo = true,
                 fecha_registro = DateTime.UtcNow
@@ -277,7 +340,6 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
             await _usuarioRepository.AddAsync(user);
             await _usuarioRepository.SaveChangesAsync();
 
-            // 2. Crear la agencia asociada al usuario
             var agencia = new agencia
             {
                 usuario_id = user.id,
@@ -288,12 +350,11 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
                 direccion = solicitud.direccion,
                 ciudad = solicitud.ciudad,
                 pais = solicitud.pais,
-                esta_verificada = false // Por defecto no está verificada
+                esta_verificada = false
             };
 
             await _agenciaRepository.AddAsync(agencia);
 
-            // 3. Actualizar el estado de la solicitud
             solicitud.estado = "aprobada";
             solicitud.fecha_respuesta = DateTime.UtcNow;
             await _solicitudRegistroAgenciaRepository.UpdateAsync(solicitud);
@@ -301,9 +362,7 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
             await _solicitudRegistroAgenciaRepository.SaveChangesAsync();
             await _agenciaRepository.SaveChangesAsync();
 
-            // 4. Notificar al solicitante por email
-            await NotificarAprobacionAgencia(solicitud.email, solicitud.nombre);
-
+            await _emailProfesionalService.EnviarCorreoAprobacionAgencia(solicitud.email, solicitud.nombre);
             return true;
         }
 
@@ -320,7 +379,6 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
             if (solicitud.estado != "pendiente")
                 throw new Exception("Esta solicitud ya ha sido procesada.");
 
-            // Actualizar el estado de la solicitud
             solicitud.estado = "rechazada";
             solicitud.fecha_respuesta = DateTime.UtcNow;
             solicitud.motivo_rechazo = motivo;
@@ -328,30 +386,25 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
             await _solicitudRegistroAgenciaRepository.UpdateAsync(solicitud);
             await _solicitudRegistroAgenciaRepository.SaveChangesAsync();
 
-            // Notificar al solicitante por email
-            await NotificarRechazoAgencia(solicitud.email, solicitud.nombre, motivo);
+            await _emailProfesionalService.EnviarCorreoRechazoAgencia(solicitud.email, solicitud.nombre, motivo);
 
             return true;
         }
 
-        // Método NotificarAdminsNuevaSolicitudAgencia
         public async Task NotificarAdminsNuevaSolicitudAgencia(int solicitudId)
         {
             try
             {
-                // Obtener todos los administradores
                 var admins = await _usuarioRepository.GetUsersByRoleAsync("admin");
 
                 foreach (var admin in admins)
                 {
-                    // Notificar solo por SignalR si el usuario está conectado
                     await _notificador.NotificarUsuarioAsync(
                         admin.id,
                         $"Nueva solicitud de agencia (ID: {solicitudId}) pendiente de revisión",
                         "info"
                     );
 
-                    // Notificación por email
                     var emailDestino = admin.email;
                     if (!string.IsNullOrWhiteSpace(emailDestino))
                     {
@@ -377,12 +430,10 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
                     </html>
                 ";
 
-                        // Aquí pasamos la ruta de la imagen como el cuarto parámetro
-                        await _emailSender.SendEmailWithEmbeddedImageAsync(
+                        await _emailProfesionalService.EnviarNotificacionAdministrador(
                             emailDestino,
-                            asunto,
-                            mensaje,
-                            "src\\AgencyPlatform.Application\\ImagenLogo.png" // Ruta de la imagen
+                            "Nueva solicitud de registro de agencia",
+                            $"Se ha recibido una nueva solicitud de registro de agencia. La solicitud tiene el ID: <strong>{solicitudId}</strong>. Por favor revisa el panel de administración."
                         );
                     }
                 }
@@ -393,57 +444,15 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
             }
         }
 
-
         private string GetBase64Image()
         {
-            // Aquí puedes agregar tu cadena base64 de la imagen predeterminada
             return "iVBORw0KGgoAAAANSUhEUgAAAJQAAACUCAMAAABC4vDmAAAAYFBMVEX///8AAAD5+fnl5eVpaWnU1NTx8fFISEjs7Ow1NTWPj49eXl7Z2dmbm5v29vb8/PywsLAkJCS3t7cwMDB9fX2mpqYRERFRUVF0dHQaGhpCQkLf39+FhYVWVlbMzMy+vr5RG8qnAAADcUlEQVR4nO2b2ZKjIBRAIRo3RDTGLZr4/385gPaUW2aQCLFm7nnq6lyLU5dFFkEIAAAAAAAAAAAAAP4tmOkCbrW7E+oZVnIeWIMbupiUqnSchJVBUoyb4rqLVz5YmWtXd4yLnY94oeFcXVyMg53PBCEuiclcCSln5zNcCgfEYK50pRB7msuVthQymCt9KcQqU7n6QMpcrj6RQkllxuojKeTxp3F6Din+tkyGPxMj7UpHSrwFXMeTOE8DNagl9eIipS+p5BzDOTZXWlKoWEwZ6JFKmlIMvchMqj62UellaobDW9ixMz6QUgWkVAEpVUBKFZBSBaRUASlVQEoVkFIFpFRZSiXtuPZFQbso6dIGqyA7UgSToUAnx9E8NMLhEJnwIItSDPFFnJ8MTrOSOTwyF6Gej382OKxIIXTjBT4T6VRe50vMa4lFrpLnYqfFQkPveZFVzJ2aeBkbNzxXsdhn6af/Ni/FxG6/oLyug0Wu8GpHyoYU6kXR+SpP4jeRQVz28z0WK+NUIKT87XDRxsvFEZYNqTiTVfRI1sGy32GctbalAtHvItEHV7FyPz/iecxnuTIv1fI8ZbHsg/6immSeepnJbNrizEuJ3cLr2Afv89D72O+uonKtSmU/WeCjqDsPrYcdVyZy1ViViungxNCLLnqlQ1/jT3Fkt/rQ/oP0/3Q+pQFIqQJSSLEjWpa6BE5fRF0XFX3rvS3XqtSLTg9gSjKOnV+UCmi4/r4lXA7yVqWcaJz4kq5IOUU3Jq2MNoKtSF2G4zy/i5PfLZ0lcTRM8ehSwIpUK+Zy2O1XBV1e4hwbP+cTTytSt0ZU28a6QRCLamxsr2aGk9j07QDF5AqsmI5g5qXk7Dz406gZyJn65B9W9hLcjXXMFPmFhEUpnqk8Yn97uzAeZFWKOQrvOx5ktU0pMc/lSaTmgJQqIKUKSKkCUqqAlCogpQpIqQJSqpiR2nvxYkFwuJTYsv/w2+10dQzwMRqXeeYU2fGfpDPNa09TqoOddC+ITXl82FM22X+Vbkpt9KoYAAAAAAAAcBJY4r3hm1Zp6G/zTSn6bjb/bakcN6GbZW5FSEl8/HycQarz74UfUj+su7vbuZRmJ5CqSURrwtfflZtiv7sV5QmksltIqwetsornqa676AyZwoTnKPfdPMtLl+BHeAqpM/a+TX4BkQ4q4g8R7tMAAAAASUVORK5CYII=";
         }
-
-
-
-
-
-        public async Task NotificarAprobacionAgencia(string email, string nombreAgencia)
-        {
-            try
-            {
-                // Obtener ruta de la imagen (completa o relativa dependiendo del entorno)
-                var imagePath = Path.Combine(Directory.GetCurrentDirectory(), "src", "AgencyPlatform.Application", "ImagenLogo.png");
-
-                // Enviar correo con la imagen incrustada
-                await _emailSender.SendEmailWithEmbeddedImageAsync(
-                    email,
-                    "¡Tu solicitud de agencia ha sido aprobada!",
-                    $"Felicidades, tu solicitud para registrar la agencia '{nombreAgencia}' ha sido aprobada. " +
-                    $"Ya puedes iniciar sesión en nuestra plataforma con el email y contraseña que proporcionaste durante el registro.",
-                    imagePath  // Pasamos la ruta de la imagen
-                );
-
-                // Notificación en tiempo real usando SignalR
-                var usuario = await _usuarioRepository.GetByEmailAsync(email); // Obtener el usuario por su email
-                if (usuario != null)
-                {
-                    await _notificador.NotificarUsuarioAsync(
-                        usuario.id, // Enviamos la notificación al usuario
-                        $"Tu solicitud de agencia '{nombreAgencia}' ha sido aprobada.",
-                        "success" // Tipo de mensaje: success
-                    );
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error al enviar notificación de aprobación a {Email}", email);
-            }
-        }
-
-
 
         private async Task NotificarRechazoAgencia(string email, string nombreAgencia, string motivo)
         {
             try
             {
-                // Notificación por email
                 await _emailSender.SendEmailAsync(
                     email,
                     "Tu solicitud de registro de agencia ha sido rechazada",
@@ -452,14 +461,13 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
                     $"\n\nSi consideras que esto es un error o deseas obtener más información, por favor contacta a nuestro equipo de soporte."
                 );
 
-                // Notificación en tiempo real usando SignalR
-                var usuario = await _usuarioRepository.GetByEmailAsync(email); // Obtener el usuario por su email
+                var usuario = await _usuarioRepository.GetByEmailAsync(email);
                 if (usuario != null)
                 {
                     await _notificador.NotificarUsuarioAsync(
-                        usuario.id, // Enviamos la notificación al usuario
+                        usuario.id,
                         $"Tu solicitud de agencia '{nombreAgencia}' ha sido rechazada. Motivo: {motivo}",
-                        "error" // Tipo de mensaje: error
+                        "error"
                     );
                 }
             }
@@ -469,7 +477,6 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
             }
         }
 
-
         public async Task ActualizarAsync(UpdateAgenciaDto agenciaDto)
         {
             var usuarioId = ObtenerUsuarioId();
@@ -478,7 +485,6 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
             if (actual == null || actual.id != agenciaDto.Id)
                 throw new UnauthorizedAccessException("No tienes permisos para editar esta agencia.");
 
-            // Actualizar propiedades permitidas
             actual.nombre = agenciaDto.Nombre;
             actual.descripcion = agenciaDto.Descripcion;
             actual.logo_url = agenciaDto.LogoUrl;
@@ -505,7 +511,6 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
             await _agenciaRepository.SaveChangesAsync();
         }
 
-        // Gestión de acompañantes
         public async Task<List<AcompananteDto>> GetAcompanantesByAgenciaIdAsync(int agenciaId)
         {
             await VerificarPermisosAgencia(agenciaId);
@@ -528,13 +533,11 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
 
             acompanante.agencia_id = agenciaId;
 
-            // Al cambiar de agencia, se pierde la verificación anterior
             if (acompanante.esta_verificado == true)
             {
                 acompanante.esta_verificado = false;
                 acompanante.fecha_verificacion = null;
 
-                // Eliminar registro de verificación si existe
                 var verificacion = await _verificacionRepository.GetByAcompananteIdAsync(acompananteId);
                 if (verificacion != null)
                 {
@@ -558,12 +561,10 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
             if (acompanante.agencia_id != agenciaId)
                 throw new Exception("El acompañante no pertenece a esta agencia.");
 
-            // Al salir de la agencia, se pierde la verificación
             acompanante.agencia_id = null;
             acompanante.esta_verificado = false;
             acompanante.fecha_verificacion = null;
 
-            // Eliminar registro de verificación si existe
             var verificacion = await _verificacionRepository.GetByAcompananteIdAsync(acompananteId);
             if (verificacion != null)
             {
@@ -574,9 +575,10 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
             await _acompananteRepository.SaveChangesAsync();
         }
 
-        // Verificación de acompañantes
         public async Task<VerificacionDto> VerificarAcompananteAsync(int agenciaId, int acompananteId, VerificarAcompananteDto datosVerificacion)
         {
+            _logger.LogDebug("Iniciando verificación de acompañante {AcompananteId} para agencia {AgenciaId}. MontoCobrado: {MontoCobrado}, Observaciones: {Observaciones}", acompananteId, agenciaId, datosVerificacion.MontoCobrado, datosVerificacion.Observaciones);
+
             await VerificarPermisosAgencia(agenciaId);
 
             var agencia = await _agenciaRepository.GetByIdAsync(agenciaId);
@@ -597,30 +599,32 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
             if (agencia.esta_verificada != true)
                 throw new Exception("La agencia debe estar verificada para poder verificar acompañantes.");
 
-            // Verificar si el acompañante ya ha pagado por una verificación anteriormente
+            if (datosVerificacion.MontoCobrado < 0)
+                throw new ArgumentException("El monto cobrado no puede ser negativo.");
+
             bool yaPagoVerificacion = await _pagoVerificacionRepository.ExistenPagosCompletadosAsync(acompananteId);
 
-            // Si ya pagó anteriormente, la nueva verificación no tiene costo
             if (yaPagoVerificacion)
             {
-                datosVerificacion.MontoCobrado = 0; // Verificación gratuita
+                _logger.LogInformation("El acompañante {AcompananteId} ya tiene un pago de verificación completado. Estableciendo MontoCobrado a 0.", acompananteId);
+                datosVerificacion.MontoCobrado = 0;
             }
 
-            // Crear verificación
             var verificacion = new verificacione
             {
                 agencia_id = agenciaId,
                 acompanante_id = acompananteId,
                 fecha_verificacion = DateTime.UtcNow,
                 monto_cobrado = datosVerificacion.MontoCobrado,
-                estado = "aprobada",
+                estado = "pendiente",
                 observaciones = datosVerificacion.Observaciones
             };
 
             await _verificacionRepository.AddAsync(verificacion);
-            await _verificacionRepository.SaveChangesAsync(); // Guardamos primero para obtener el ID
+            await _verificacionRepository.SaveChangesAsync();
 
-            // Crear registro de pago
+            _logger.LogInformation("Verificación creada con ID {VerificacionId} para acompañante {AcompananteId}", verificacion.id, acompananteId);
+
             var nuevoPago = new pago_verificacion
             {
                 verificacion_id = verificacion.id,
@@ -632,31 +636,90 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
             };
 
             await _pagoVerificacionRepository.AddAsync(nuevoPago);
+            await _pagoVerificacionRepository.SaveChangesAsync();
 
-            // Actualizar acompañante como verificado
-            acompanante.esta_verificado = true;
-            acompanante.fecha_verificacion = DateTime.UtcNow;
-            await _acompananteRepository.UpdateAsync(acompanante);
+            _logger.LogInformation("Pago de verificación creado con ID {PagoId}. Estado: {Estado}, Monto: {Monto}", nuevoPago.id, nuevoPago.estado, nuevoPago.monto);
 
-            // Otorgar puntos a la agencia por verificar acompañantes
+            // Procesar el pago real si el monto es mayor a 0
             if (datosVerificacion.MontoCobrado > 0)
             {
-                await OtorgarPuntosAgenciaAsync(new OtorgarPuntosAgenciaDto
+                var cliente = await _clienteRepository.GetByIdAsync(agencia.usuario_id);
+                if (cliente == null)
+                    throw new Exception("Cliente no encontrado para la agencia.");
+
+                // Procesar el pago real con Stripe
+                var transaccion = await _paymentService.ProcesarPagoCliente(
+                    clienteId: cliente.id,
+                    acompananteId: acompananteId,
+                    monto: datosVerificacion.MontoCobrado,
+                    paymentMethodId: datosVerificacion.MetodoPago
+                );
+
+                nuevoPago.estado = transaccion.estado;
+                nuevoPago.referencia_pago = transaccion.id_transaccion_externa;
+                nuevoPago.fecha_pago = transaccion.fecha_procesamiento;
+
+                await _pagoVerificacionRepository.UpdateAsync(nuevoPago);
+                await _pagoVerificacionRepository.SaveChangesAsync();
+
+                if (transaccion.estado == "completado")
                 {
-                    AgenciaId = agenciaId,
-                    Cantidad = 50, // Puntos base por verificación
-                    Concepto = $"Verificación de acompañante: {acompanante.nombre_perfil}"
-                });
+                    // Marcar el acompañante como verificado
+                    acompanante.esta_verificado = true;
+                    acompanante.fecha_verificacion = DateTime.UtcNow;
+                    await _acompananteRepository.UpdateAsync(acompanante);
+                    await _acompananteRepository.SaveChangesAsync();
+
+                    // Notificar al acompañante y a la agencia
+                    if (acompanante.usuario?.email != null)
+                    {
+                        _logger.LogDebug("Enviando correo de verificación al acompañante {AcompananteId} a {Email}", acompananteId, acompanante.usuario.email);
+                        await _emailProfesionalService.EnviarCorreoVerificacionAcompanante(
+                            acompanante.usuario.email,
+                            acompanante.nombre_perfil,
+                            agencia.nombre
+                        );
+                    }
+
+                    await _emailSender.SendEmailAsync(
+                        agencia.usuario.email,
+                        "Pago de verificación completado",
+                        $"El pago de verificación del acompañante {acompanante.nombre_perfil} ha sido completado. Monto: ${datosVerificacion.MontoCobrado}"
+                    );
+
+                    // Otorgar puntos a la agencia
+                    await OtorgarPuntosAgenciaAsync(new OtorgarPuntosAgenciaDto
+                    {
+                        AgenciaId = agenciaId,
+                        Cantidad = 50,
+                        Concepto = $"Verificación de acompañante: {acompanante.nombre_perfil}"
+                    });
+
+                    await AplicarComisionPorVerificacionAsync(agenciaId);
+                }
+            }
+            else
+            {
+                // Si no hay monto cobrado, marcar como verificado directamente
+                acompanante.esta_verificado = true;
+                acompanante.fecha_verificacion = DateTime.UtcNow;
+                await _acompananteRepository.UpdateAsync(acompanante);
+                await _acompananteRepository.SaveChangesAsync();
+
+                if (acompanante.usuario?.email != null)
+                {
+                    _logger.LogDebug("Enviando correo de verificación al acompañante {AcompananteId} a {Email}", acompananteId, acompanante.usuario.email);
+                    await _emailProfesionalService.EnviarCorreoVerificacionAcompanante(
+                        acompanante.usuario.email,
+                        acompanante.nombre_perfil,
+                        agencia.nombre
+                    );
+                }
             }
 
-            // Aplicar comisión/descuento a la agencia
-            await AplicarComisionPorVerificacionAsync(agenciaId);
-
-            await _pagoVerificacionRepository.SaveChangesAsync();
-            await _acompananteRepository.SaveChangesAsync();
+            _logger.LogInformation("Verificación completada para acompañante {AcompananteId}. Estado del acompañante actualizado a verificado.", acompananteId);
 
             return _mapper.Map<VerificacionDto>(verificacion);
-
         }
 
         public async Task<List<AcompananteDto>> GetAcompanantesVerificadosAsync(int agenciaId)
@@ -677,34 +740,134 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
             return _mapper.Map<List<AcompananteDto>>(pendientes);
         }
 
-        // Anuncios destacados
         public async Task<AnuncioDestacadoDto> CrearAnuncioDestacadoAsync(CrearAnuncioDestacadoDto anuncioDto)
         {
-            await VerificarPermisosAgencia(anuncioDto.AgenciaId);
+            var usuarioId = ObtenerUsuarioId();
+            var agencia = await _agenciaRepository.GetByUsuarioIdAsync(usuarioId)
+                ?? throw new UnauthorizedAccessException("No tienes una agencia asociada.");
+            var agenciaId = agencia.id;
 
-            var acompanante = await _acompananteRepository.GetByIdAsync(anuncioDto.AcompananteId);
+            _logger.LogDebug("Usuario {UsuarioId} autenticado como agencia {AgenciaId}", usuarioId, agenciaId);
 
-            if (acompanante == null)
-                throw new Exception("Acompañante no encontrado.");
+            var acompanante = await _acompananteRepository.GetByIdAsync(anuncioDto.AcompananteId)
+                ?? throw new NotFoundException("Acompañante", anuncioDto.AcompananteId);
+            if (acompanante.agencia_id != agenciaId)
+                throw new UnauthorizedAccessException("El acompañante no pertenece a esta agencia.");
+            if (acompanante.esta_verificado != true)
+                throw new BusinessRuleViolationException("El acompañante debe estar verificado para crear un anuncio destacado.");
 
-            if (acompanante.agencia_id != anuncioDto.AgenciaId)
-                throw new Exception("El acompañante no pertenece a esta agencia.");
+            _logger.LogDebug("Acompañante {AcompananteId} validado para agencia {AgenciaId}. Verificado: {EstaVerificado}", anuncioDto.AcompananteId, agenciaId, acompanante.esta_verificado);
 
-            var nuevoAnuncio = new anuncios_destacado
+            var fechaInicioUtc = anuncioDto.FechaInicio.Kind == DateTimeKind.Unspecified
+                ? DateTime.SpecifyKind(anuncioDto.FechaInicio, DateTimeKind.Utc)
+                : anuncioDto.FechaInicio.ToUniversalTime();
+            var fechaFinUtc = anuncioDto.FechaFin.Kind == DateTimeKind.Unspecified
+                ? DateTime.SpecifyKind(anuncioDto.FechaFin, DateTimeKind.Utc)
+                : anuncioDto.FechaFin.ToUniversalTime();
+
+            if (fechaFinUtc <= fechaInicioUtc)
+                throw new BusinessRuleViolationException("La fecha de fin debe ser posterior a la fecha de inicio.");
+
+            var duracionDias = (fechaFinUtc - fechaInicioUtc).Days;
+            if (duracionDias <= 0)
+                throw new BusinessRuleViolationException("La duración del anuncio debe ser mayor a 0 días.");
+
+            _logger.LogDebug("Duración del anuncio calculada: {DuracionDias} días (Inicio: {FechaInicio}, Fin: {FechaFin})", duracionDias, fechaInicioUtc, fechaFinUtc);
+
+            if (anuncioDto.Tipo == TipoAnuncio.Portada)
             {
-                acompanante_id = anuncioDto.AcompananteId,
-                fecha_inicio = anuncioDto.FechaInicio,
-                fecha_fin = anuncioDto.FechaFin,
-                tipo = anuncioDto.Tipo,
-                monto_pagado = anuncioDto.MontoPagado,
-                cupon_id = anuncioDto.CuponId,
-                esta_activo = true
-            };
+                if (duracionDias > 1)
+                    throw new BusinessRuleViolationException("Los anuncios de tipo Portada solo pueden durar 1 día.");
 
-            await _anuncioRepository.AddAsync(nuevoAnuncio);
-            await _anuncioRepository.SaveChangesAsync();
+                var anunciosPortadaActivos = await _anuncioRepository.GetActivosPorTipoYFechasAsync(
+                    "portada", fechaInicioUtc, fechaFinUtc);
+                if (anunciosPortadaActivos.Count >= 5)
+                    throw new BusinessRuleViolationException("No hay espacio disponible en el carrusel para este período.");
 
-            return _mapper.Map<AnuncioDestacadoDto>(nuevoAnuncio);
+                _logger.LogDebug("Anuncios activos de tipo Portada en el período: {Cantidad}", anunciosPortadaActivos.Count);
+            }
+
+            if (duracionDias > 30)
+                throw new BusinessRuleViolationException("La duración del anuncio no puede exceder 30 días.");
+
+            var costosParaTipo = _costos.Where(c => c.Tipo == anuncioDto.Tipo).ToList();
+            if (!costosParaTipo.Any())
+                throw new BusinessRuleViolationException($"No hay costos configurados para el tipo de anuncio {anuncioDto.Tipo}.");
+
+            decimal montoFinal;
+            string duracionTipo;
+
+            if (duracionDias <= 1)
+            {
+                duracionTipo = "día";
+                montoFinal = costosParaTipo.FirstOrDefault(c => c.Duracion == "día")?.Costo
+                    ?? throw new BusinessRuleViolationException($"No hay costo configurado para {anuncioDto.Tipo} con duración de 1 día.");
+            }
+            else if (duracionDias <= 7)
+            {
+                duracionTipo = "semana";
+                montoFinal = costosParaTipo.FirstOrDefault(c => c.Duracion == "semana")?.Costo
+                    ?? costosParaTipo.FirstOrDefault(c => c.Duracion == "día")?.Costo * duracionDias
+                    ?? throw new BusinessRuleViolationException($"No hay costo configurado para {anuncioDto.Tipo} con duración de {duracionDias} días.");
+            }
+            else
+            {
+                duracionTipo = "mes";
+                montoFinal = costosParaTipo.FirstOrDefault(c => c.Duracion == "mes")?.Costo
+                    ?? costosParaTipo.FirstOrDefault(c => c.Duracion == "semana")?.Costo * (duracionDias / 7m)
+                    ?? costosParaTipo.FirstOrDefault(c => c.Duracion == "día")?.Costo * duracionDias
+                    ?? throw new BusinessRuleViolationException($"No hay costo configurado para {anuncioDto.Tipo} con duración de {duracionDias} días.");
+            }
+
+            _logger.LogDebug("Costo calculado para {TipoAnuncio} con duración {DuracionTipo} ({DuracionDias} días): {MontoFinal}", anuncioDto.Tipo, duracionTipo, duracionDias, montoFinal);
+
+            var cliente = await _clienteRepository.GetByIdAsync(agencia.usuario_id);
+            if (cliente == null)
+                throw new Exception("Cliente no encontrado para la agencia.");
+
+            // Procesar el pago real con Stripe
+            var transaccion = await _paymentService.ProcesarPagoCliente(
+                clienteId: cliente.id,
+                acompananteId: anuncioDto.AcompananteId,
+                monto: montoFinal,
+                paymentMethodId: anuncioDto.MetodoPago
+            );
+
+            anuncios_destacado nuevoAnuncio;
+            using (var scope = new TransactionScope(TransactionScopeAsyncFlowOption.Enabled))
+            {
+                nuevoAnuncio = new anuncios_destacado
+                {
+                    acompanante_id = anuncioDto.AcompananteId,
+                    fecha_inicio = fechaInicioUtc,
+                    fecha_fin = fechaFinUtc,
+                    tipo = anuncioDto.Tipo switch
+                    {
+                        TipoAnuncio.Portada => "portada",
+                        TipoAnuncio.PremiumTop => "top",
+                        TipoAnuncio.Destacado => "destacado",
+                        _ => throw new BusinessRuleViolationException($"Tipo de anuncio no soportado: {anuncioDto.Tipo}")
+                    },
+                    monto_pagado = montoFinal,
+                    cupon_id = null, // No se usa cupón
+                    esta_activo = transaccion.estado == "completado",
+                    created_at = DateTime.UtcNow,
+                    updated_at = DateTime.UtcNow,
+                    payment_reference = transaccion.id_transaccion_externa
+                };
+
+                await _anuncioRepository.AddAsync(nuevoAnuncio);
+                await _anuncioRepository.SaveChangesAsync();
+                if (acompanante.esta_verificado != true)
+                    throw new BusinessRuleViolationException("El acompañante debe estar verificado para crear un anuncio destacado.");
+
+                _logger.LogInformation("Anuncio destacado creado con ID {AnuncioId} para el acompañante {AcompananteId}, estado: {Estado}", nuevoAnuncio.id, nuevoAnuncio.acompanante_id);
+
+                scope.Complete();
+            }
+
+            var anuncioDestacadoDto = _mapper.Map<AnuncioDestacadoDto>(nuevoAnuncio);
+            return anuncioDestacadoDto;
         }
 
         public async Task<List<AnuncioDestacadoDto>> GetAnunciosByAgenciaAsync(int agenciaId)
@@ -715,7 +878,6 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
             return _mapper.Map<List<AnuncioDestacadoDto>>(anuncios);
         }
 
-        // Estadísticas y métricas
         public async Task<AgenciaEstadisticasDto> GetEstadisticasAgenciaAsync(int agenciaId)
         {
             await VerificarPermisosAgencia(agenciaId);
@@ -735,6 +897,7 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
                 AcompanantesDisponibles = estadisticas.acompanantes_disponibles ?? 0
             };
         }
+
         public async Task<ComisionesDto> GetComisionesByAgenciaAsync(int agenciaId, DateTime fechaInicio, DateTime fechaFin)
         {
             await VerificarPermisosAgencia(agenciaId);
@@ -744,10 +907,8 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
             if (agencia == null)
                 throw new Exception("Agencia no encontrada.");
 
-            // Obtener verificaciones en el período
             var verificaciones = await _verificacionRepository.GetByAgenciaIdAndPeriodoAsync(agenciaId, fechaInicio, fechaFin);
 
-            // Calcular comisión
             decimal comisionPorcentaje = await _agenciaRepository.GetComisionPorcentajeByAgenciaIdAsync(agenciaId);
             decimal totalVerificaciones = verificaciones.Sum(v => v.monto_cobrado ?? 0);
             decimal comisionTotal = totalVerificaciones * (comisionPorcentaje / 100);
@@ -758,15 +919,12 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
                 FechaInicio = fechaInicio,
                 FechaFin = fechaFin,
                 PorcentajeComision = comisionPorcentaje,
-                TotalVerificaciones = verificaciones.Count,  // Corregir esto
+                TotalVerificaciones = verificaciones.Count,
                 MontoTotalVerificaciones = totalVerificaciones,
                 ComisionTotal = comisionTotal
             };
         }
 
-        // Comisiones y beneficios
-
-        // Métodos para administradores
         public async Task<bool> VerificarAgenciaAsync(int agenciaId, bool verificada)
         {
             if (!EsAdmin())
@@ -776,50 +934,39 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
             if (agencia == null)
                 throw new Exception($"Agencia con ID {agenciaId} no encontrada.");
 
-            // Si el estado actual ya es el deseado, no es necesario hacer cambios
             if (agencia.esta_verificada == verificada)
                 return verificada;
 
-            // Actualizar estado de verificación
             agencia.esta_verificada = verificada;
 
             if (verificada)
             {
                 _logger.LogInformation($"Verificando agencia ID {agenciaId}");
 
-                // Establecer fecha de verificación actual
                 agencia.fecha_verificacion = DateTime.UtcNow;
+                agencia.comision_porcentaje = 5.00m;
 
-                // Establecer comisión inicial para la agencia verificada
-                agencia.comision_porcentaje = 5.00m; // Comisión base del 5%
-
-                // Opcional: Notificar a la agencia que ha sido verificada
                 try
                 {
                     if (agencia.usuario?.email != null)
                     {
-                        await _emailSender.SendEmailAsync(
+                        await _emailProfesionalService.EnviarCorreoVerificacionAgencia(
                             agencia.usuario.email,
-                            "Tu agencia ha sido verificada",
-                            $"Felicidades, tu agencia '{agencia.nombre}' ha sido verificada exitosamente. " +
-                            "Ahora puedes verificar a tus acompañantes y aprovechar todas las ventajas de nuestra plataforma."
+                            agencia.nombre
                         );
                     }
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error al enviar notificación de verificación a la agencia {AgenciaId}", agenciaId);
-                    // Continuamos con el proceso aunque la notificación falle
                 }
             }
             else
             {
                 _logger.LogInformation($"Quitando verificación a agencia ID {agenciaId}");
 
-                // Limpiar fecha de verificación
                 agencia.fecha_verificacion = null;
 
-                // Una agencia no verificada no puede tener acompañantes verificados
                 var acompanantes = await _agenciaRepository.GetAcompanantesVerificadosByAgenciaIdAsync(agenciaId);
 
                 _logger.LogInformation($"Quitando verificación a {acompanantes.Count} acompañantes de la agencia {agenciaId}");
@@ -831,18 +978,16 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
                     await _acompananteRepository.UpdateAsync(acompanante);
                 }
 
-                // Eliminar todas las verificaciones de acompañantes de esta agencia
                 await _verificacionRepository.DeleteByAgenciaIdAsync(agenciaId);
 
-                // Opcional: Notificar a la agencia que se le ha quitado la verificación
                 try
                 {
                     if (agencia.usuario?.email != null)
                     {
-                        await _emailSender.SendEmailAsync(
+                        await _emailProfesionalService.EnviarNotificacionAdministrador(
                             agencia.usuario.email,
                             "Verificación de agencia revocada",
-                            $"Se ha revocado la verificación de tu agencia '{agencia.nombre}'. " +
+                            $"Se ha revocado la verificación de tu agencia <strong>{agencia.nombre}</strong>. " +
                             "Si crees que esto es un error, por favor contacta a nuestro equipo de soporte."
                         );
                     }
@@ -850,11 +995,9 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error al enviar notificación de revocación a la agencia {AgenciaId}", agenciaId);
-                    // Continuamos con el proceso aunque la notificación falle
                 }
             }
 
-            // Guardar los cambios
             await _agenciaRepository.UpdateAsync(agencia);
             await _agenciaRepository.SaveChangesAsync();
 
@@ -872,7 +1015,6 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
             return _mapper.Map<List<AgenciaPendienteVerificacionDto>>(agencias);
         }
 
-        // Métodos privados de utilidad
         private int ObtenerUsuarioId()
         {
             var userIdStr = _httpContextAccessor.HttpContext?.User?.Claims
@@ -892,7 +1034,7 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
         private async Task VerificarPermisosAgencia(int agenciaId)
         {
             if (EsAdmin())
-                return; // Los administradores tienen acceso a todas las agencias
+                return;
 
             var agencia = await _agenciaRepository.GetByIdAsync(agenciaId);
 
@@ -903,26 +1045,22 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
                 throw new UnauthorizedAccessException("No tienes permisos para acceder a esta agencia.");
         }
 
-
         private async Task AplicarComisionPorVerificacionAsync(int agenciaId)
         {
             var agencia = await _agenciaRepository.GetByIdAsync(agenciaId);
             if (agencia == null)
                 return;
 
-            // Obtener el número de acompañantes verificados para determinar el aumento de comisión
             var verificados = await _agenciaRepository.GetAcompanantesVerificadosByAgenciaIdAsync(agenciaId);
             int cantidadVerificados = verificados.Count;
 
-            // Lógica de cálculo de comisión y descuentos más detallada
             decimal nuevaComision = agencia.comision_porcentaje ?? 0;
             decimal descuentoVerificaciones = 0;
 
-            // Los porcentajes pueden cambiar en función de más criterios
             if (cantidadVerificados >= 50)
             {
                 nuevaComision = 12.00m;
-                descuentoVerificaciones = 25.00m; // 25% de descuento en verificaciones
+                descuentoVerificaciones = 25.00m;
             }
             else if (cantidadVerificados >= 25)
             {
@@ -935,12 +1073,10 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
                 descuentoVerificaciones = 15.00m;
             }
 
-            // Solo actualizar si la nueva comisión es mayor que la anterior
             if (nuevaComision > (agencia.comision_porcentaje ?? 0))
             {
                 await _agenciaRepository.UpdateComisionPorcentajeAsync(agenciaId, nuevaComision);
 
-                // Notificar a la agencia sobre el cambio en la comisión
                 try
                 {
                     var emailAgencia = agencia.usuario?.email;
@@ -960,14 +1096,10 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
             }
         }
 
-
-
-
         public async Task<List<AgenciaDisponibleDto>> GetAgenciasDisponiblesAsync()
         {
             var agencias = await _agenciaRepository.GetAllAsync();
 
-            // Opcional: filtrar solo las verificadas
             agencias = agencias.Where(a => a.esta_verificada == true).ToList();
 
             return agencias.Select(a => new AgenciaDisponibleDto
@@ -979,8 +1111,6 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
                 EstaVerificada = a.esta_verificada ?? false
             }).ToList();
         }
-
-
 
         public async Task<List<SolicitudAgenciaDto>> GetSolicitudesPendientesAsync()
         {
@@ -1001,8 +1131,11 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
                 FechaRespuesta = s.FechaRespuesta
             }).ToList();
         }
+
         public async Task AprobarSolicitudAsync(int solicitudId)
         {
+            _logger.LogDebug("Aprobando solicitud {SolicitudId}", solicitudId);
+
             var solicitud = await _agenciaRepository.GetSolicitudByIdAsync(solicitudId)
                 ?? throw new Exception("Solicitud no encontrada.");
 
@@ -1024,59 +1157,25 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
             await _agenciaRepository.SaveChangesAsync();
             await _acompananteRepository.SaveChangesAsync();
 
-            try
-            {
-                var emailDestino = solicitud.Acompanante?.usuario?.email;
-                if (!string.IsNullOrWhiteSpace(emailDestino))
-                {
-                    var asunto = "Tu solicitud fue aprobada";
-                    var mensaje = EmailTemplates.SolicitudAprobadaAcompanante(
-                        solicitud.Acompanante.nombre_perfil,
-                        solicitud.Agencia?.nombre ?? "una agencia");
+            _logger.LogInformation("Solicitud {SolicitudId} aprobada. Acompañante {AcompananteId} asignado a agencia {AgenciaId}", solicitudId, solicitud.AcompananteId, solicitud.AgenciaId);
 
-                    await _emailSender.SendEmailAsync(emailDestino, asunto, mensaje);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "❌ Error al enviar email al acompañante ID {AcompananteId}", solicitud.AcompananteId);
-            }
-
-            try
-            {
-                var emailAgencia = solicitud.Agencia?.usuario?.email;
-                if (!string.IsNullOrWhiteSpace(emailAgencia))
-                {
-                    var asunto = "Solicitud aprobada exitosamente";
-                    var mensaje = EmailTemplates.SolicitudAprobadaAgencia(
-                        solicitud.Agencia.nombre,
-                        solicitud.Acompanante?.nombre_perfil ?? "acompañante");
-
-                    await _emailSender.SendEmailAsync(emailAgencia, asunto, mensaje);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "❌ Error al enviar email a la agencia ID {AgenciaId}", solicitud.AgenciaId);
-            }
-
-            // ✅ SignalR real-time
-            try
-            {
-                await _notificador.NotificarUsuarioAsync(
-                    solicitud.Acompanante.usuario_id,
-                    $"Tu solicitud a la agencia '{solicitud.Agencia?.nombre}' ha sido aprobada 🎉."
-                );
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "❌ Error al enviar notificación SignalR al usuario ID {UsuarioId}", solicitud.Acompanante.usuario_id);
-            }
+            await NotificarSolicitudAsync(
+                solicitud: solicitud,
+                estado: "aprobada",
+                mensajeAcompananteEmail: "Tu solicitud ha sido aprobada",
+                mensajeAcompananteSignalR: $"Tu solicitud a la agencia '{solicitud.Agencia?.nombre}' ha sido aprobada 🎉.",
+                mensajeAgenciaEmail: "Solicitud aprobada exitosamente",
+                mensajeAgenciaEmailBody: EmailTemplates.SolicitudAprobadaAgencia(
+                    solicitud.Agencia.nombre,
+                    solicitud.Acompanante?.nombre_perfil ?? "acompañante")
+            );
         }
 
         public async Task RechazarSolicitudAsync(int solicitudId)
         {
             var usuarioId = ObtenerUsuarioId();
+
+            _logger.LogDebug("Rechazando solicitud {SolicitudId} por usuario {UsuarioId}", solicitudId, usuarioId);
 
             var agencia = await _agenciaRepository.GetByUsuarioIdAsync(usuarioId)
                 ?? throw new UnauthorizedAccessException("No tienes una agencia asociada.");
@@ -1095,46 +1194,18 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
 
             await _agenciaRepository.SaveChangesAsync();
 
-            // 🔔 Notificar por email al acompañante
-            try
-            {
-                var emailDestino = solicitud.Acompanante?.usuario?.email;
-                if (!string.IsNullOrWhiteSpace(emailDestino))
-                {
-                    var asunto = "Tu solicitud fue rechazada";
-                    var mensaje = EmailTemplates.SolicitudRechazadaAcompanante(
-                        solicitud.Acompanante?.nombre_perfil ?? "Estimado usuario",
-                        solicitud.Agencia?.nombre ?? "una agencia"
-                    );
+            _logger.LogInformation("Solicitud {SolicitudId} rechazada por agencia {AgenciaId}", solicitudId, agencia.id);
 
-                    await _emailSender.SendEmailAsync(emailDestino, asunto, mensaje);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "❌ Error al enviar email de rechazo al acompañante ID {AcompananteId}", solicitud.AcompananteId);
-            }
-
-            // 🔔 Notificar a la agencia también
-            try
-            {
-                var emailAgencia = solicitud.Agencia?.usuario?.email;
-                if (!string.IsNullOrWhiteSpace(emailAgencia))
-                {
-                    var asunto = "Solicitud rechazada correctamente";
-                    var mensaje = EmailTemplates.SolicitudRechazadaAgencia(
-                        solicitud.Agencia?.nombre ?? "Agencia",
-                        solicitud.Acompanante?.nombre_perfil ?? "un acompañante"
-                    );
-
-                    await _emailSender.SendEmailAsync(emailAgencia, asunto, mensaje);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "❌ Error al enviar email de notificación a la agencia ID {AgenciaId}", solicitud.AgenciaId);
-            }
+            await NotificarSolicitudAsync(
+                solicitud: solicitud,
+                estado: "rechazada",
+                mensajeAcompananteEmail: "La agencia ha decidido no aceptar tu solicitud en este momento.",
+                mensajeAcompananteSignalR: null,
+                mensajeAgenciaEmail: "Solicitud rechazada correctamente",
+                mensajeAgenciaEmailBody: $"Has rechazado la solicitud de <strong>{solicitud.Acompanante?.nombre_perfil ?? "un acompañante"}</strong> para unirse a tu agencia. La solicitud ha sido marcada como rechazada y el acompañante ha sido notificado."
+            );
         }
+
         public async Task EnviarSolicitudAsync(int agenciaId)
         {
             var usuarioId = ObtenerUsuarioId();
@@ -1157,7 +1228,6 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
             await _agenciaRepository.CrearSolicitudAsync(nuevaSolicitud);
             await _agenciaRepository.SaveChangesAsync();
 
-            // 🔔 Notificar por email a la agencia
             try
             {
                 var agencia = await _agenciaRepository.GetByIdAsync(agenciaId);
@@ -1172,7 +1242,7 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[Notificación Fallida Agencia] {ex.Message}");
+                _logger.LogError(ex, "Error al enviar notificación por email a la agencia ID {AgenciaId}", agenciaId);
             }
         }
 
@@ -1191,41 +1261,37 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
 
             return await _acompananteRepository.GetEstadisticasPerfilAsync(acompananteId);
         }
+
         public async Task<int> GetAgenciaIdByUsuarioIdAsync(int usuarioId)
         {
             var agencia = await _agenciaRepository.GetByUsuarioIdAsync(usuarioId);
             return agencia?.id ?? 0;
         }
+
         public async Task<AgenciaDashboardDto> GetDashboardAsync(int agenciaId)
         {
-            // Verificar que la agencia existe
             var agencia = await _agenciaRepository.GetByIdAsync(agenciaId);
             if (agencia == null)
                 throw new NotFoundException($"Agencia con id {agenciaId} no encontrada");
 
-            // Obtener contadores
             var totalAcompanantes = await _acompananteRepository.CountByAgenciaIdAsync(agenciaId);
             var totalVerificados = await _acompananteRepository.CountVerificadosByAgenciaIdAsync(agenciaId);
             var pendientesVerificacion = totalAcompanantes - totalVerificados;
             var solicitudesPendientes = await _solicitudAgenciaRepository.CountPendientesByAgenciaIdAsync(agenciaId);
             var anunciosActivos = await _anuncioRepository.CountActivosByAgenciaIdAsync(agenciaId);
 
-            // Obtener comisiones del último mes
             var fechaInicio = DateTime.Now.AddMonths(-1);
             var fechaFin = DateTime.Now;
             var comisiones = await _comisionRepository.GetByAgenciaIdAndFechasAsync(agenciaId, fechaInicio, fechaFin);
             decimal comisionesTotal = comisiones.Sum(c => c.Monto);
 
-            // Obtener puntos acumulados de la agencia
             var puntosAgencia = agencia.puntos_acumulados;
 
-            // Obtener acompañantes destacados (los más visitados/contactados)
             var acompanantesDestacados = await _acompananteRepository.GetDestacadosByAgenciaIdAsync(agenciaId, 5);
             var acompanantesResumen = acompanantesDestacados.Select(a => new AcompananteResumenDto
             {
                 Id = a.id,
                 NombrePerfil = a.nombre_perfil,
-                //FotoUrl = a.fotoUrl,
                 TotalVisitas = a.visitas_perfils.Count,
                 TotalContactos = a.contactos.Count
             }).ToList();
@@ -1244,17 +1310,15 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
         }
 
         public async Task<AcompanantesIndependientesResponseDto> GetAcompanantesIndependientesAsync(
-                int pageNumber = 1,
-                int pageSize = 10,
-                string filterBy = null,
-                string sortBy = "Id",
-                bool sortDesc = false)
+            int pageNumber = 1,
+            int pageSize = 10,
+            string filterBy = null,
+            string sortBy = "Id",
+            bool sortDesc = false)
         {
-            // Validación de parámetros
             pageNumber = pageNumber < 1 ? 1 : pageNumber;
             pageSize = pageSize < 1 ? 10 : (pageSize > 50 ? 50 : pageSize);
 
-            // Obtener acompañantes independientes paginados
             var resultado = await _acompananteRepository.GetIndependientesAsync(
                 pageNumber, pageSize, filterBy, sortBy, sortDesc);
 
@@ -1262,7 +1326,6 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
 
             foreach (var acompanante in resultado.Items)
             {
-                // Obtener URL de la foto principal
                 string fotoUrl = "";
                 if (acompanante.fotos != null && acompanante.fotos.Any())
                 {
@@ -1289,24 +1352,23 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
             {
                 TotalItems = resultado.TotalItems,
                 TotalPages = resultado.TotalPages,
-                CurrentPage = resultado.CurrentPage,
                 PageSize = resultado.PageSize,
+                CurrentPage = resultado.CurrentPage,
                 Items = items
             };
         }
+
         public async Task<SolicitudesHistorialResponseDto> GetHistorialSolicitudesAsync(
-        int agenciaId,
-        DateTime? fechaDesde = null,
-        DateTime? fechaHasta = null,
-        string estado = null,
-        int pageNumber = 1,
-        int pageSize = 10)
+            int agenciaId,
+            DateTime? fechaDesde = null,
+            DateTime? fechaHasta = null,
+            string estado = null,
+            int pageNumber = 1,
+            int pageSize = 10)
         {
-            // Validación de parámetros
             pageNumber = pageNumber < 1 ? 1 : pageNumber;
             pageSize = pageSize < 1 ? 10 : (pageSize > 50 ? 50 : pageSize);
 
-            // Obtener solicitudes filtradas
             var resultado = await _solicitudAgenciaRepository.GetHistorialAsync(
                 agenciaId, null, fechaDesde, fechaHasta, estado, pageNumber, pageSize);
 
@@ -1314,7 +1376,6 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
 
             foreach (var solicitud in resultado.Items)
             {
-                // Obtener foto del acompañante
                 string fotoUrl = "";
                 if (solicitud.acompanante?.fotos != null && solicitud.acompanante.fotos.Any())
                 {
@@ -1343,11 +1404,12 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
             {
                 TotalItems = resultado.TotalItems,
                 TotalPages = resultado.TotalPages,
-                CurrentPage = resultado.CurrentPage,
                 PageSize = resultado.PageSize,
+                CurrentPage = resultado.CurrentPage,
                 Items = items
             };
         }
+
         public async Task<List<VerificacionDto>> VerificarAcompanantesLoteAsync(VerificacionLoteDto dto)
         {
             await VerificarPermisosAgencia(dto.AgenciaId);
@@ -1362,18 +1424,36 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
             if (agencia.esta_verificada != true)
                 throw new Exception("La agencia debe estar verificada para poder verificar acompañantes.");
 
-            // Aplicar descuento por lote
             decimal descuento = 0;
             if (dto.AcompananteIds.Count >= 10)
-                descuento = 0.25m; // 25% de descuento
+                descuento = 0.25m;
             else if (dto.AcompananteIds.Count >= 5)
-                descuento = 0.15m; // 15% de descuento
+                descuento = 0.15m;
             else if (dto.AcompananteIds.Count >= 3)
-                descuento = 0.10m; // 10% de descuento
+                descuento = 0.10m;
 
             decimal montoUnitarioConDescuento = dto.MontoCobradoUnitario * (1 - descuento);
 
+            var cliente = await _clienteRepository.GetByIdAsync(agencia.usuario_id);
+            if (cliente == null)
+                throw new Exception("Cliente no encontrado para la agencia.");
+
             var resultados = new List<VerificacionDto>();
+
+            decimal montoTotal = montoUnitarioConDescuento * dto.AcompananteIds.Count;
+
+            // Procesar el pago total para el lote
+            transaccion transaccionLote = null;
+            if (montoTotal > 0)
+            {
+                // Usamos el primer acompañante como referencia para el pago del lote
+                transaccionLote = await _paymentService.ProcesarPagoCliente(
+                    clienteId: cliente.id,
+                    acompananteId: dto.AcompananteIds.First(),
+                    monto: montoTotal,
+                    paymentMethodId: dto.MetodoPago
+                );
+            }
 
             foreach (var acompananteId in dto.AcompananteIds)
             {
@@ -1390,25 +1470,73 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
                     if (acompanante.esta_verificado == true)
                         continue;
 
-                    // Crear verificación para este acompañante
-                    var verificacionDto = new VerificarAcompananteDto
+                    var verificacion = new verificacione
                     {
-                        MontoCobrado = montoUnitarioConDescuento,
-                        Observaciones = dto.Observaciones + $" (Verificación en lote con {descuento * 100}% de descuento)"
+                        agencia_id = dto.AgenciaId,
+                        acompanante_id = acompananteId,
+                        fecha_verificacion = DateTime.UtcNow,
+                        monto_cobrado = montoUnitarioConDescuento,
+                        estado = transaccionLote != null ? transaccionLote.estado : "completado",
+                        observaciones = dto.Observaciones + $" (Verificación en lote con {descuento * 100}% de descuento)"
                     };
 
-                    var resultado = await VerificarAcompananteAsync(dto.AgenciaId, acompananteId, verificacionDto);
-                    resultados.Add(resultado);
+                    await _verificacionRepository.AddAsync(verificacion);
+                    await _verificacionRepository.SaveChangesAsync();
+
+                    var nuevoPago = new pago_verificacion
+                    {
+                        verificacion_id = verificacion.id,
+                        acompanante_id = acompananteId,
+                        agencia_id = dto.AgenciaId,
+                        monto = montoUnitarioConDescuento,
+                        estado = transaccionLote != null ? transaccionLote.estado : "completado",
+                        fecha_pago = transaccionLote != null ? transaccionLote.fecha_procesamiento : DateTime.UtcNow,
+                        referencia_pago = transaccionLote?.id_transaccion_externa
+                    };
+
+                    await _pagoVerificacionRepository.AddAsync(nuevoPago);
+                    await _pagoVerificacionRepository.SaveChangesAsync();
+
+                    if (transaccionLote == null || transaccionLote.estado == "completado")
+                    {
+                        acompanante.esta_verificado = true;
+                        acompanante.fecha_verificacion = DateTime.UtcNow;
+                        await _acompananteRepository.UpdateAsync(acompanante);
+                        await _acompananteRepository.SaveChangesAsync();
+
+                        if (acompanante.usuario?.email != null)
+                        {
+                            await _emailProfesionalService.EnviarCorreoVerificacionAcompanante(
+                                acompanante.usuario.email,
+                                acompanante.nombre_perfil,
+                                agencia.nombre
+                            );
+                        }
+                    }
+
+                    resultados.Add(_mapper.Map<VerificacionDto>(verificacion));
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error al verificar acompañante ID {AcompananteId} en lote", acompananteId);
-                    // Continuar con el siguiente acompañante
                 }
+            }
+
+            if (transaccionLote != null && transaccionLote.estado == "completado")
+            {
+                await OtorgarPuntosAgenciaAsync(new OtorgarPuntosAgenciaDto
+                {
+                    AgenciaId = dto.AgenciaId,
+                    Cantidad = 50 * dto.AcompananteIds.Count,
+                    Concepto = $"Verificación de {dto.AcompananteIds.Count} acompañantes en lote"
+                });
+
+                await AplicarComisionPorVerificacionAsync(dto.AgenciaId);
             }
 
             return resultados;
         }
+
         public async Task CancelarSolicitudAsync(int solicitudId, int usuarioId, string motivo)
         {
             var solicitud = await _solicitudAgenciaRepository.GetByIdAsync(solicitudId);
@@ -1452,7 +1580,6 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
             await _solicitudAgenciaRepository.UpdateAsync(solicitud);
             await _solicitudAgenciaRepository.SaveChangesAsync();
 
-            // 🔔 Notificar por email
             try
             {
                 if (solicitud.agencia?.usuario?.email != null)
@@ -1476,14 +1603,14 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
                 _logger.LogError(ex, "❌ Error al enviar correos de notificación para solicitud cancelada ID {SolicitudId}", solicitud.id);
             }
 
-            // 🔔 Notificación en tiempo real (SignalR)
             try
             {
                 if (solicitud.agencia?.usuario_id > 0)
                 {
                     await _notificador.NotificarUsuarioAsync(
                         solicitud.agencia.usuario_id,
-                        $"La solicitud del acompañante '{solicitud.acompanante?.nombre_perfil ?? "desconocido"}' fue cancelada. ❌"
+                        $"La solicitud del acompañante '{solicitud.acompanante?.nombre_perfil ?? "desconocido"}' fue cancelada. ❌",
+                        "error"
                     );
                 }
 
@@ -1491,7 +1618,8 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
                 {
                     await _notificador.NotificarUsuarioAsync(
                         solicitud.acompanante.usuario_id,
-                        $"Tu solicitud a la agencia '{solicitud.agencia?.nombre ?? "desconocida"}' ha sido cancelada. ❌"
+                        $"Tu solicitud a la agencia '{solicitud.agencia?.nombre ?? "desconocida"}' ha sido cancelada. ❌",
+                        "error"
                     );
                 }
             }
@@ -1500,6 +1628,7 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
                 _logger.LogError(ex, "❌ Error al enviar notificación SignalR para solicitud cancelada ID {SolicitudId}", solicitud.id);
             }
         }
+
         public async Task CompletarPerfilAgenciaAsync(CompletarPerfilAgenciaDto dto)
         {
             var usuarioId = ObtenerUsuarioId();
@@ -1507,22 +1636,17 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
             var agencia = await _agenciaRepository.GetByUsuarioIdAsync(usuarioId)
                 ?? throw new Exception("No tienes una agencia registrada.");
 
-            // Validar los campos antes de completar el perfil
             if (string.IsNullOrWhiteSpace(dto.LogoUrl) || string.IsNullOrWhiteSpace(dto.SitioWeb))
             {
                 throw new Exception("El logo y el sitio web son obligatorios para completar el perfil.");
             }
 
-            // Campos que completan el perfil
             agencia.logo_url = dto.LogoUrl;
             agencia.sitio_web = dto.SitioWeb;
 
             await _agenciaRepository.UpdateAsync(agencia);
             await _agenciaRepository.SaveChangesAsync();
         }
-
-
-
 
         public async Task<PuntosAgenciaDto> GetPuntosAgenciaAsync(int agenciaId)
         {
@@ -1603,6 +1727,244 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
             return true;
         }
 
+        public async Task<bool> InvitarAcompananteAsync(int acompananteId)
+        {
+            var usuarioId = ObtenerUsuarioId();
+
+            var agencia = await _agenciaRepository.GetByUsuarioIdAsync(usuarioId)
+                ?? throw new UnauthorizedAccessException("No tienes una agencia asociada.");
+
+            var acompanante = await _acompananteRepository.GetByIdAsync(acompananteId)
+                ?? throw new Exception("Acompañante no encontrado.");
+
+            if (acompanante.agencia_id.HasValue)
+                throw new Exception("El acompañante ya pertenece a una agencia.");
+
+            var yaExiste = await _agenciaRepository.ExisteSolicitudPendienteAsync(acompanante.id, agencia.id);
+            if (yaExiste)
+                throw new Exception("Ya existe una solicitud pendiente para este acompañante.");
+
+            var nuevaSolicitud = new SolicitudAgencia
+            {
+                AcompananteId = acompananteId,
+                AgenciaId = agencia.id,
+                Estado = "pendiente",
+                FechaSolicitud = DateTime.UtcNow
+            };
+
+            await _agenciaRepository.CrearSolicitudAsync(nuevaSolicitud);
+            await _agenciaRepository.SaveChangesAsync();
+
+            try
+            {
+                var emailDestino = acompanante.usuario?.email;
+                if (!string.IsNullOrWhiteSpace(emailDestino))
+                {
+                    await _emailProfesionalService.EnviarCorreoInvitacionAgencia(emailDestino, acompanante.nombre_perfil, agencia.nombre);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al enviar email de invitación al acompañante ID {AcompananteId}", acompananteId);
+            }
+
+            try
+            {
+                await _notificador.NotificarUsuarioAsync(
+                    acompanante.usuario_id,
+                    $"Has recibido una invitación de la agencia '{agencia.nombre}' para unirte a su equipo.",
+                    "info"
+                );
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al enviar notificación SignalR al acompañante ID {AcompananteId}", acompananteId);
+            }
+
+            return true;
+        }
+
+
+
+
+        public async Task<bool> ConfirmarPagoVerificacionAsync(int pagoId, string referenciaPago)
+        {
+            var pago = await _pagoVerificacionRepository.GetByIdAsync(pagoId);
+            if (pago == null)
+                throw new NotFoundException("Pago de verificación", pagoId);
+
+            if (pago.estado == "completado")
+                throw new BusinessRuleViolationException("Este pago ya ha sido completado anteriormente");
+
+            pago.estado = "completado";
+            pago.fecha_pago = DateTime.UtcNow;
+            pago.referencia_pago = referenciaPago;
+
+            await _pagoVerificacionRepository.UpdateAsync(pago);
+            await _pagoVerificacionRepository.SaveChangesAsync();
+
+            var acompanante = await _acompananteRepository.GetByIdAsync(pago.acompanante_id);
+            var usuario = acompanante?.usuario;
+
+            if (usuario != null && !string.IsNullOrEmpty(usuario.email))
+            {
+                string nombreUsuario = "Usuario";
+
+                if (acompanante != null && !string.IsNullOrEmpty(acompanante.nombre_perfil))
+                {
+                    nombreUsuario = acompanante.nombre_perfil;
+                }
+
+                await _emailProfesionalService.EnviarConfirmacionPago(
+                    usuario.email,
+                    nombreUsuario,
+                    "Verificación de perfil",
+                    pago.monto,
+                    pago.id.ToString()
+                );
+            }
+
+            try
+            {
+                var agencia = await _agenciaRepository.GetByIdAsync(pago.agencia_id);
+                if (agencia?.usuario?.email != null)
+                {
+                    var asunto = "Pago de verificación completado";
+                    var mensaje = $"El pago de verificación del acompañante {acompanante?.nombre_perfil ?? "desconocido"} ha sido completado. Monto: ${pago.monto}";
+                    await _emailSender.SendEmailAsync(agencia.usuario.email, asunto, mensaje);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al notificar a la agencia sobre el pago completado. PagoId: {PagoId}", pagoId);
+            }
+
+            _logger.LogInformation("Pago de verificación ID {PagoId} confirmado correctamente", pagoId);
+            return true;
+        }
+        public async Task<AnuncioDestacadoDto> GetAnuncioByReferenceIdAsync(string referenceId)
+        {
+            var anuncio = await _anuncioRepository.GetByReferenceIdAsync(referenceId);
+            return anuncio != null ? _mapper.Map<AnuncioDestacadoDto>(anuncio) : null;
+        }
+
+        public async Task UpdateAnuncioAsync(AnuncioDestacadoDto anuncio)
+        {
+            var anuncioEntity = await _anuncioRepository.GetByIdAsync(anuncio.Id);
+            if (anuncioEntity != null)
+            {
+                anuncioEntity.esta_activo = anuncio.EstaActivo;
+                anuncioEntity.updated_at = DateTime.UtcNow;
+                await _anuncioRepository.UpdateAsync(anuncioEntity);
+                await _anuncioRepository.SaveChangesAsync();
+                _logger.LogInformation("Anuncio {AnuncioId} actualizado: EstaActivo={EstaActivo}", anuncio.Id, anuncio.EstaActivo);
+            }
+            else
+            {
+                _logger.LogWarning("No se encontró anuncio con ID {AnuncioId} para actualizar", anuncio.Id);
+                throw new NotFoundException("Anuncio", anuncio.Id);
+            }
+        }
+
+        public async Task<SolicitudAgenciaDto> GetSolicitudByIdAsync(int solicitudId)
+        {
+            _logger.LogInformation("Obteniendo solicitud con ID: {SolicitudId}", solicitudId);
+            var solicitud = await _agenciaRepository.GetSolicitudByIdAsync(solicitudId);
+            if (solicitud == null)
+            {
+                _logger.LogWarning("Solicitud con ID: {SolicitudId} no encontrada", solicitudId);
+                return null;
+            }
+            _logger.LogInformation("Solicitud con ID: {SolicitudId} obtenida correctamente", solicitudId);
+            return _mapper.Map<SolicitudAgenciaDto>(solicitud);
+        }
+
+        private async Task NotificarSolicitudAsync(
+            SolicitudAgencia solicitud,
+            string estado,
+            string mensajeAcompananteEmail,
+            string mensajeAcompananteSignalR,
+            string mensajeAgenciaEmail,
+        string mensajeAgenciaEmailBody)
+        {
+            // Notificación al acompañante (email)
+            try
+            {
+                var emailDestinoAcompanante = solicitud.Acompanante?.usuario?.email;
+                if (!string.IsNullOrWhiteSpace(emailDestinoAcompanante))
+                {
+                    if (estado == "aprobada")
+                    {
+                        await _emailProfesionalService.EnviarCorreoSolicitudAprobada(
+                            emailDestinoAcompanante,
+                            solicitud.Acompanante.nombre_perfil,
+                            solicitud.Agencia?.nombre ?? "una agencia"
+                        );
+                    }
+                    else if (estado == "rechazada")
+                    {
+                        await _emailProfesionalService.EnviarCorreoSolicitudRechazada(
+                            emailDestinoAcompanante,
+                            solicitud.Acompanante?.nombre_perfil ?? "Estimado usuario",
+                            solicitud.Agencia?.nombre ?? "una agencia",
+                            mensajeAcompananteEmail
+                        );
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error al enviar email al acompañante ID {AcompananteId}", solicitud.AcompananteId);
+            }
+
+            // Notificación a la agencia (email)
+            try
+            {
+                var emailDestinoAgencia = solicitud.Agencia?.usuario?.email;
+                if (!string.IsNullOrWhiteSpace(emailDestinoAgencia))
+                {
+                    if (estado == "aprobada")
+                    {
+                        await _emailSender.SendEmailAsync(
+                            emailDestinoAgencia,
+                            mensajeAgenciaEmail,
+                            mensajeAgenciaEmailBody
+                        );
+                    }
+                    else if (estado == "rechazada")
+                    {
+                        await _emailProfesionalService.EnviarNotificacionAdministrador(
+                            emailDestinoAgencia,
+                            mensajeAgenciaEmail,
+                            mensajeAgenciaEmailBody
+                        );
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error al enviar email a la agencia ID {AgenciaId}", solicitud.AgenciaId);
+            }
+
+            // Notificación al acompañante (SignalR)
+            if (!string.IsNullOrEmpty(mensajeAcompananteSignalR))
+            {
+                try
+                {
+                    await _notificador.NotificarUsuarioAsync(
+                        solicitud.Acompanante.usuario_id,
+                        mensajeAcompananteSignalR
+                    );
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "❌ Error al enviar notificación SignalR al usuario ID {UsuarioId}", solicitud.Acompanante.usuario_id);
+                }
+            }
+
+
+        }
 
     }
+
 }

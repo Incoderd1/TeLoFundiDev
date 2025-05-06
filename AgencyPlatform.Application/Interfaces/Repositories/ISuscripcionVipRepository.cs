@@ -26,6 +26,10 @@ namespace AgencyPlatform.Application.Interfaces.Repositories
         //nuevos
         Task<List<suscripciones_vip>> GetActivasByFechaFinAsync(DateTime now);
 
+        Task<List<suscripciones_vip>> GetSuscripcionesVencidasActivasAsync(DateTime fecha);
+        Task<List<suscripciones_vip>> GetSuscripcionesPorRenovarAsync(DateTime fecha);
+        Task<List<suscripciones_vip>> GetSuscripcionesVencenEnDiasAsync(int dias);
+
 
     }
 }

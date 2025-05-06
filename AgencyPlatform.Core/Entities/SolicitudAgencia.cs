@@ -17,8 +17,12 @@ namespace AgencyPlatform.Core.Entities
         public DateTime FechaSolicitud { get; set; }
         public DateTime? FechaRespuesta { get; set; }
 
+
         // Relaciones (opcional, si quieres navegación)
         public virtual acompanante Acompanante { get; set; }
         public virtual agencia Agencia { get; set; }
+
+        public bool IniciadaPorAgencia { get; set; }
+
     }
 }

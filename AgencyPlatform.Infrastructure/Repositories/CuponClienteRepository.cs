@@ -66,5 +66,21 @@ namespace AgencyPlatform.Infrastructure.Repositories
                                          && c.fecha_expiracion < now)
                              .ToListAsync();
         }
+        public async Task<int> EliminarCuponesVencidosNoUsadosAsync(DateTime fecha)
+        {
+            var cuponesVencidos = await _context.cupones_clientes
+                .Where(c => c.esta_usado == false &&
+                           c.fecha_expiracion < fecha)
+                .ToListAsync();
+
+            _context.cupones_clientes.RemoveRange(cuponesVencidos);
+            await _context.SaveChangesAsync();
+
+            return cuponesVencidos.Count;
+        }
+        public async Task<cupones_cliente> GetByIdAsync(int id)
+        {
+            return await _context.cupones_clientes.FirstOrDefaultAsync(c => c.id == id);
+        }
     }
 }

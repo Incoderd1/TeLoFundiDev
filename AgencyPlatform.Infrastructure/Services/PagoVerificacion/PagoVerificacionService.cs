@@ -30,7 +30,8 @@ namespace AgencyPlatform.Infrastructure.Services.PagoVerificacion
             IMapper mapper,
             ILogger<PagoVerificacionService> logger,
             IEmailSender emailSender,
-            IPaymentService paymentService)
+            IPaymentService paymentService,
+            IConfiguration configuration)
         {
             _pagoVerificacionRepository = pagoVerificacionRepository;
             _agenciaRepository = agenciaRepository;
@@ -39,6 +40,7 @@ namespace AgencyPlatform.Infrastructure.Services.PagoVerificacion
             _logger = logger;
             _emailSender = emailSender;
             _paymentService = paymentService;
+            _configuration = configuration;
         }
 
         public async Task<List<PagoVerificacionDto>> GetPagosByAgenciaIdAsync(int agenciaId)
@@ -184,5 +186,40 @@ namespace AgencyPlatform.Infrastructure.Services.PagoVerificacion
         {
             return _httpContextAccessor.HttpContext?.User?.IsInRole("admin") ?? false;
         }
+        public async Task<string> CrearIntentoPagoAsync(int verificacionId)
+        {
+            var pago = await _pagoVerificacionRepository.GetByVerificacionIdAsync(verificacionId);
+            if (pago == null)
+                throw new Exception("Pago no encontrado");
+
+            await VerificarPermisosAgencia(pago.agencia_id);
+
+            if (pago.estado != "pendiente")
+                throw new Exception("Este pago ya ha sido procesado");
+
+            var acompanante = await _compananteRepository.GetByIdAsync(pago.acompanante_id);
+            var nombreAcompanante = acompanante?.nombre_perfil ?? "Acompañante";
+
+            // Crear intento de pago con metadata
+            var metadata = new Dictionary<string, string>
+    {
+        { "tipo", "verificacion" },
+        { "verificacionId", verificacionId.ToString() },
+        { "acompananteId", pago.acompanante_id.ToString() },
+        { "agenciaId", pago.agencia_id.ToString() }
+    };
+
+            var clientSecret = await _paymentService.CreatePaymentIntent(
+        pago.monto,
+        pago.moneda ?? "usd",
+        $"Verificación de {nombreAcompanante}",
+        metadata  // Asegúrate de que metadata es Dictionary<string, string>
+    );
+
+            return clientSecret;
+        }
+
+      
+
     }
 }

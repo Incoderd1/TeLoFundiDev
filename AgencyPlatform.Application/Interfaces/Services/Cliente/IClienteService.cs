@@ -1,6 +1,7 @@
 ﻿using AgencyPlatform.Application.DTOs.Acompanantes;
 using AgencyPlatform.Application.DTOs.Cliente;
 using AgencyPlatform.Application.DTOs.Sorteos;
+using AgencyPlatform.Core.Entities;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -17,7 +18,7 @@ namespace AgencyPlatform.Application.Interfaces.Services.Cliente
         Task<ClienteDetailDto> GetClienteDetailAsync(int id);
         Task<ClienteDashboardDto> GetDashboardAsync(int clienteId);
         Task<List<MovimientoPuntosDto>> ObtenerHistorialPuntosAsync(int clienteId, int cantidad = 10);
-
+        Task UpdateAsync(cliente cliente);
 
         //cupones para los clientes
         Task<List<CuponClienteDto>> ObtenerCuponesDisponiblesAsync(int clienteId);

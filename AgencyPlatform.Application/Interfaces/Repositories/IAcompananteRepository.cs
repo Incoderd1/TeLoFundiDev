@@ -4,6 +4,7 @@ using AgencyPlatform.Core.Entities;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -75,9 +76,82 @@ namespace AgencyPlatform.Application.Interfaces.Repositories
         Task<int> CountAsync(Func<acompanante, bool> predicate);
         Task<int> CountDestacadosAsync();
         Task<List<acompanante>> GetAllPaginatedAsync(int skip, int take);
+        Task<List<acompanante>> GetAllPaginatedAsync(int skip, int take, Expression<Func<acompanante, bool>> predicate);
+
         Task<List<acompanante>> GetRecientesPaginadosAsync(int skip, int take);
         Task<List<acompanante>> GetPopularesPaginadosAsync(int skip, int take);
         Task<List<acompanante>> GetDestacadosPaginadosAsync(int skip, int take);
+
+        Task<List<acompanante>> SearchAdvancedAsync(
+            string? searchText = null,
+            bool matchExactPhrase = false,
+            string? ciudad = null,
+            string? pais = null,
+            double? latitud = null,
+            double? longitud = null,
+            int? radioKm = null,
+            string? genero = null,
+            int? edadMinima = null,
+            int? edadMaxima = null,
+            int? alturaMinima = null,
+            int? alturaMaxima = null,
+            decimal? tarifaMinima = null,
+            decimal? tarifaMaxima = null,
+            string? moneda = null,
+            List<int>? categoriaIds = null,
+            List<int>? servicioIds = null,
+            List<string>? idiomasRequeridos = null,
+            bool soloVerificados = false,
+            bool soloDisponibles = true,
+            bool? conAgencia = null,
+            int? agenciaId = null,
+            bool soloConFotos = false,
+            int? minimoFotos = null,
+            string orderBy = "Relevancia",
+            bool orderDescending = true,
+            int pageNumber = 1,
+            int pageSize = 20);
+
+        Task<int> CountSearchAdvancedAsync(
+            string? searchText = null,
+            bool matchExactPhrase = false,
+            string? ciudad = null,
+            string? pais = null,
+            double? latitud = null,
+            double? longitud = null,
+            int? radioKm = null,
+            string? genero = null,
+            int? edadMinima = null,
+            int? edadMaxima = null,
+            int? alturaMinima = null,
+            int? alturaMaxima = null,
+            decimal? tarifaMinima = null,
+            decimal? tarifaMaxima = null,
+            string? moneda = null,
+            List<int>? categoriaIds = null,
+            List<int>? servicioIds = null,
+            List<string>? idiomasRequeridos = null,
+            bool soloVerificados = false,
+            bool soloDisponibles = true,
+            bool? conAgencia = null,
+            int? agenciaId = null,
+            bool soloConFotos = false,
+            int? minimoFotos = null);
+
+        Task<List<dynamic>> GetCiudadesConCoincidenciaAsync(string searchTerm, int limit);
+
+
+        Task<List<acompanante>> GetAllActivosAsync();
+        Task<List<acompanante>> GetPerfilesInactivosDesdeAsync(DateTime fechaLimite);
+        Task<int> CountVisitasPeriodoAsync(int acompananteId, DateTime fechaInicio, DateTime fechaFin);
+        Task<int> CountContactosPeriodoAsync(int acompananteId, DateTime fechaInicio, DateTime fechaFin);
+        Task ActualizarVistaRankingPerfilesAsync();
+
+
+        //Task<acompanante?> GetByStripeAccountIdAsync(string stripeAccountId);
+        //Task<List<acompanante>> GetPendientesStripeOnboardingAsync();
+
+
 
 
     }

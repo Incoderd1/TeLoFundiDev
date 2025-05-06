@@ -101,6 +101,15 @@ public partial class AgencyPlatformDbContext : DbContext
     public DbSet<pago_verificacion> PagosVerificacion { get; set; }
 
 
+    //mapearlas
+
+    public DbSet<busqueda_guardada> busqueda_guardadas { get; set; }
+    public DbSet<registro_busqueda> registro_busquedas { get; set; }
+    public DbSet<transaccion> transacciones { get; set; }
+    public DbSet<transferencia> transferencias { get; set; }
+
+
+
 
 
 
@@ -119,6 +128,46 @@ public partial class AgencyPlatformDbContext : DbContext
             entity.Property(e => e.email).HasMaxLength(255);
             entity.Property(e => e.ip_address).HasMaxLength(50);
             entity.Property(e => e.created_at).HasDefaultValueSql("CURRENT_TIMESTAMP");
+        });
+        // Dentro del método OnModelCreating
+        modelBuilder.Entity<busqueda_guardada>(entity =>
+        {
+            entity.ToTable("busqueda_guardada", "plataforma");
+
+            entity.HasKey(e => e.id);
+            entity.Property(e => e.id).UseIdentityAlwaysColumn();
+
+            entity.Property(e => e.usuario_id).IsRequired();
+            entity.Property(e => e.nombre).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.criterios_json).IsRequired();
+            entity.Property(e => e.fecha_creacion).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.veces_usada).HasDefaultValue(1);
+
+            // Relación con usuario
+            entity.HasOne(d => d.usuario)
+                .WithMany()
+                .HasForeignKey(d => d.usuario_id)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<registro_busqueda>(entity =>
+        {
+            entity.ToTable("registro_busqueda", "plataforma");
+
+            entity.HasKey(e => e.id);
+            entity.Property(e => e.id).UseIdentityAlwaysColumn();
+
+            entity.Property(e => e.fecha_busqueda).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.criterios_json).IsRequired();
+            entity.Property(e => e.cantidad_resultados).IsRequired();
+            entity.Property(e => e.ip_busqueda).HasMaxLength(50);
+            entity.Property(e => e.user_agent).HasMaxLength(255);
+
+            // Relación con usuario (opcional)
+            entity.HasOne(d => d.usuario)
+                .WithMany()
+                .HasForeignKey(d => d.usuario_id)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<pago_verificacion>(entity =>
@@ -208,6 +257,8 @@ public partial class AgencyPlatformDbContext : DbContext
 
             entity.Property(e => e.updated_at)
                 .HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.IniciadaPorAgencia).HasColumnName("iniciada_por_agencia").HasDefaultValue(false);
+
 
             // Configurar relación con acompanante
             entity.HasOne(e => e.acompanante)
@@ -276,6 +327,58 @@ public partial class AgencyPlatformDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
+        modelBuilder.Entity<transaccion>(entity =>
+        {
+            entity.HasKey(e => e.id).HasName("transacciones_pkey");
+            entity.ToTable("transacciones", "plataforma");
+            entity.Property(e => e.id).UseIdentityAlwaysColumn();
+
+            entity.Property(e => e.monto_total).HasPrecision(10, 2);
+            entity.Property(e => e.monto_acompanante).HasPrecision(10, 2);
+            entity.Property(e => e.monto_agencia).HasPrecision(10, 2);
+            entity.Property(e => e.estado).HasMaxLength(50);
+            entity.Property(e => e.proveedor_pago).HasMaxLength(50);
+            entity.Property(e => e.id_transaccion_externa).HasMaxLength(255);
+            entity.Property(e => e.metadata).HasColumnType("text");
+            entity.Property(e => e.created_at).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.updated_at).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(d => d.cliente)
+                .WithMany()
+                .HasForeignKey(d => d.cliente_id)
+                .HasConstraintName("transacciones_cliente_id_fkey");
+
+            entity.HasOne(d => d.acompanante)
+                .WithMany()
+                .HasForeignKey(d => d.acompanante_id)
+                .HasConstraintName("transacciones_acompanante_id_fkey");
+
+            entity.HasOne(d => d.agencia)
+                .WithMany()
+                .HasForeignKey(d => d.agencia_id)
+                .HasConstraintName("transacciones_agencia_id_fkey");
+        });
+
+        modelBuilder.Entity<transferencia>(entity =>
+        {
+            entity.HasKey(e => e.id).HasName("transferencias_pkey");
+            entity.ToTable("transferencias", "plataforma");
+            entity.Property(e => e.id).UseIdentityAlwaysColumn();
+
+            entity.Property(e => e.estado).HasMaxLength(50);
+            entity.Property(e => e.proveedor_pago).HasMaxLength(50);
+            entity.Property(e => e.id_transferencia_externa).HasMaxLength(255);
+            entity.Property(e => e.error_mensaje).HasMaxLength(500);
+            entity.Property(e => e.created_at).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.updated_at).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(d => d.transaccion)
+                .WithMany()
+                .HasForeignKey(d => d.transaccion_id)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("transferencias_transaccion_id_fkey");
+        });
+
 
         modelBuilder.HasPostgresExtension("uuid-ossp");
 
@@ -311,6 +414,13 @@ public partial class AgencyPlatformDbContext : DbContext
             entity.Property(e => e.genero).HasMaxLength(50);
             entity.Property(e => e.idiomas).HasMaxLength(255);
             entity.Property(e => e.score_actividad).HasDefaultValue(0L);
+
+
+           
+
+            entity.Property(e => e.latitud);
+            entity.Property(e => e.longitud);
+            entity.Property(e => e.direccion_completa).HasMaxLength(500);
 
             // Campos de contacto
             entity.Property(e => e.telefono).HasMaxLength(20);
@@ -349,6 +459,8 @@ public partial class AgencyPlatformDbContext : DbContext
             entity.Property(e => e.Estado).HasColumnName("estado").HasMaxLength(20).HasDefaultValue("pendiente");
             entity.Property(e => e.FechaSolicitud).HasColumnName("fecha_solicitud").HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.FechaRespuesta).HasColumnName("fecha_respuesta");
+            entity.Property(e => e.IniciadaPorAgencia).HasColumnName("iniciada_por_agencia").HasDefaultValue(false);
+
 
             entity.HasIndex(e => new { e.AcompananteId, e.AgenciaId }).IsUnique();
 
@@ -407,6 +519,10 @@ public partial class AgencyPlatformDbContext : DbContext
             entity.Property(a => a.email).HasMaxLength(255);
             entity.Property(a => a.puntos_gastados).HasColumnName("puntos_gastados").HasDefaultValue(0);
             entity.Property(a => a.puntos_acumulados).HasColumnName("puntos_acumulados").HasDefaultValue(0);
+
+            entity.Property(a => a.stripe_account_id).HasColumnName("stripe_account_id").HasMaxLength(50).IsRequired(false);
+
+
 
             entity.HasOne(d => d.usuario).WithOne(p => p.agencia)
                 .HasForeignKey<agencia>(d => d.usuario_id)
@@ -549,6 +665,7 @@ public partial class AgencyPlatformDbContext : DbContext
             entity.Property(e => e.monto_pagado).HasPrecision(10, 2);
             entity.Property(e => e.tipo).HasMaxLength(50);
             entity.Property(e => e.updated_at).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.payment_reference).HasMaxLength(100);
 
             entity.HasOne(d => d.acompanante).WithMany(p => p.anuncios_destacados)
                 .HasForeignKey(d => d.acompanante_id)
@@ -601,6 +718,8 @@ public partial class AgencyPlatformDbContext : DbContext
             entity.Property(e => e.es_vip).HasDefaultValue(false);
             entity.Property(e => e.nickname).HasMaxLength(100);
             entity.Property(e => e.puntos_acumulados).HasDefaultValue(0);
+            entity.Property(e => e.stripe_customer_id).HasMaxLength(100);
+
             entity.Property(e => e.updated_at).HasDefaultValueSql("CURRENT_TIMESTAMP");
 
             entity.HasOne(d => d.usuario).WithOne(p => p.cliente)

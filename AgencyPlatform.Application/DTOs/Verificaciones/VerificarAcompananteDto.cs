@@ -9,6 +9,7 @@ namespace AgencyPlatform.Application.DTOs.Verificaciones
     public class VerificarAcompananteDto
     {
         public decimal MontoCobrado { get; set; }
-        public string? Observaciones { get; set; }
+        public string Observaciones { get; set; }
+        public string MetodoPago { get; set; } 
     }
 }

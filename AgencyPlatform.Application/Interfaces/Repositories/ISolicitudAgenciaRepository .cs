@@ -26,5 +26,9 @@ namespace AgencyPlatform.Application.Interfaces.Repositories
         Task AddAsync(solicitud_agencia solicitud);
         Task UpdateAsync(solicitud_agencia solicitud);
         Task<bool> SaveChangesAsync();
+
+
+        Task<List<solicitud_agencia>> GetSolicitudesPendientesAntiguasAsync(DateTime fechaLimite);
+
     }
 }

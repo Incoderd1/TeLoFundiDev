@@ -136,5 +136,16 @@ namespace AgencyPlatform.Infrastructure.Repositories
         {
             return await _context.SaveChangesAsync() > 0;
         }
+        public async Task<List<solicitud_agencia>> GetSolicitudesPendientesAntiguasAsync(DateTime fechaLimite)
+        {
+            return await _context.solicitud_agencias
+                .Where(s => s.estado == "pendiente" &&
+                           s.fecha_solicitud < fechaLimite)
+                .Include(s => s.acompanante)
+                    .ThenInclude(a => a.usuario)
+                .Include(s => s.agencia)
+                    .ThenInclude(a => a.usuario)
+                .ToListAsync();
+        }
     }
 }

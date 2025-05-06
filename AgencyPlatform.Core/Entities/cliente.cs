@@ -22,6 +22,8 @@ public partial class cliente
     public DateTime? created_at { get; set; }
 
     public DateTime? updated_at { get; set; }
+    public string stripe_customer_id { get; set; }
+
 
     public virtual ICollection<compras_paquete> compras_paquetes { get; set; } = new List<compras_paquete>();
 

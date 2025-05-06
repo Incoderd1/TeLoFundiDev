@@ -95,6 +95,41 @@ namespace AgencyPlatform.Infrastructure.Repositories
                 .ToListAsync();
         }
 
-       
+        public async Task<List<suscripciones_vip>> GetSuscripcionesVencidasActivasAsync(DateTime fecha)
+        {
+            return await _context.suscripciones_vips
+                .Where(s => s.estado == "activa" && s.fecha_fin < fecha)
+                .Include(s => s.cliente)
+                    .ThenInclude(c => c.usuario)
+                .Include(s => s.membresia)
+                .ToListAsync();
+        }
+        public async Task<List<suscripciones_vip>> GetSuscripcionesPorRenovarAsync(DateTime fecha)
+        {
+            return await _context.suscripciones_vips
+                .Where(s => s.estado == "activa" &&
+                           s.fecha_fin < fecha &&
+                           s.es_renovacion_automatica == true)
+                .Include(s => s.cliente)
+                    .ThenInclude(c => c.usuario)
+                .Include(s => s.membresia)
+                .ToListAsync();
+        }
+        public async Task<List<suscripciones_vip>> GetSuscripcionesVencenEnDiasAsync(int dias)
+        {
+            var fechaLimiteInferior = DateTime.UtcNow;
+            var fechaLimiteSuperior = DateTime.UtcNow.AddDays(dias);
+
+            return await _context.suscripciones_vips
+                .Where(s => s.estado == "activa" &&
+                           s.fecha_fin >= fechaLimiteInferior &&
+                           s.fecha_fin <= fechaLimiteSuperior)
+                .Include(s => s.cliente)
+                    .ThenInclude(c => c.usuario)
+                .Include(s => s.membresia)
+                .ToListAsync();
+        }
+
+
     }
 }

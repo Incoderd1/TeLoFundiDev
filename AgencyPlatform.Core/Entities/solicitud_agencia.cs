@@ -17,6 +17,8 @@ namespace AgencyPlatform.Core.Entities
         public string motivo_rechazo { get; set; }
         public string motivo_cancelacion { get; set; }
         public string mensaje_solicitud { get; set; }
+        public bool IniciadaPorAgencia { get; set; }
+
         public DateTime created_at { get; set; } = DateTime.UtcNow;
         public DateTime updated_at { get; set; } = DateTime.UtcNow;
 

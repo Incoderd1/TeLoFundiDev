@@ -16,6 +16,8 @@ namespace AgencyPlatform.Application.DTOs.Cliente
         public DateTime? FechaInicioVip { get; set; }
         public DateTime? FechaFinVip { get; set; }
         public int PuntosAcumulados { get; set; }
+        public string StripeCustomerId { get; set; }
+
         public List<CuponClienteDto> Cupones { get; set; }
     }
 }

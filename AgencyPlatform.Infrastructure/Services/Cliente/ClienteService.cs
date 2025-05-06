@@ -7,10 +7,12 @@ using AgencyPlatform.Application.Interfaces.Repositories;
 using AgencyPlatform.Application.Interfaces.Services;
 using AgencyPlatform.Application.Interfaces.Services.Cliente;
 using AgencyPlatform.Application.Interfaces.Services.ClienteCache;
+using AgencyPlatform.Application.Interfaces.Services.EmailAgencia;
 using AgencyPlatform.Application.Interfaces.Services.Recommendation;
 using AgencyPlatform.Application.Validators;
 using AgencyPlatform.Core.Entities;
 using AgencyPlatform.Core.Exceptions;
+using AgencyPlatform.Infrastructure.Services.EmailProfecional;
 using AutoMapper;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
@@ -48,6 +50,8 @@ namespace AgencyPlatform.Infrastructure.Services.Cliente
         private readonly IValidator<RegistroClienteDto> _registroValidator;
         private readonly IRecommendationService _recommendationService;
         private readonly IEmailService _emailService;
+        private readonly IEmailProfesionalService _emailProfesionalService;
+
 
 
 
@@ -77,7 +81,7 @@ namespace AgencyPlatform.Infrastructure.Services.Cliente
                      IClienteCacheService cacheService,
                       IValidator<RegistroClienteDto> registroValidator,
                       IRecommendationService recommendationService,
-                      IEmailService emailService)
+                      IEmailService emailService, IEmailProfesionalService emailProfesionalService)
         {
             _clienteRepository = clienteRepository ?? throw new ArgumentNullException(nameof(clienteRepository));
             _userRepository = userRepository ?? throw new ArgumentNullException(nameof(userRepository));
@@ -100,6 +104,8 @@ namespace AgencyPlatform.Infrastructure.Services.Cliente
             _registroValidator = registroValidator ?? throw new ArgumentNullException(nameof(registroValidator));
             _recommendationService = recommendationService ?? throw new ArgumentNullException(nameof(recommendationService));
             _emailService = emailService ?? throw new ArgumentNullException(nameof(emailService));
+            _emailProfesionalService = emailProfesionalService ?? throw new ArgumentNullException(nameof(emailProfesionalService));
+
 
 
 
@@ -505,24 +511,66 @@ namespace AgencyPlatform.Infrastructure.Services.Cliente
                 await _compraRepository.AddAsync(compra);
                 await _compraRepository.SaveChangesAsync();
 
+
                 try
                 {
-                    await _puntosService.OtorgarPuntosPorAccionAsync(clienteId, "compra_paquete");
+                    if (paquete.puntos_otorgados > 0)
+                    {
+                        await _puntosService.OtorgarPuntosManualesAsync(
+                            clienteId,
+                            paquete.puntos_otorgados,
+                            $"Compra de paquete: {paquete.nombre}"
+                        );
+                    }
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error al otorgar puntos por compra de paquete al cliente {ClienteId}", clienteId);
                 }
 
-                await GenerarCuponesPorCompraAsync(compra.id);
+                // Generar cupones
+                var cupones = await GenerarCuponesPorCompraAsync(compra.id);
+
+                // Después de generar cupones
+                if (paquete.incluye_sorteo == true)
+                {
+                    var sorteosActivos = await _sorteoRepository.GetActivosAsync();
+                    var sorteoActivo = sorteosActivos.FirstOrDefault(); // Toma el primero si hay varios
+
+                    if (sorteoActivo != null)
+                    {
+                        await _participanteRepository.AddAsync(new participantes_sorteo
+                        {
+                            cliente_id = clienteId,
+                            sorteo_id = sorteoActivo.id,
+                            fecha_participacion = DateTime.UtcNow,
+                            es_ganador = false
+                        });
+                        await _participanteRepository.SaveChangesAsync();
+                    }
+                }
 
                 // Invalidar caché de cupones usando el servicio de caché
                 _cacheService.InvalidarCacheCliente(clienteId);
 
+                // Enviar correo de confirmación usando el servicio profesional
+                if (cliente.usuario?.email != null)
+                {
+                    var cuponesCodigos = cupones.Select(c => c.codigo).ToList();
+                    await _emailProfesionalService.EnviarConfirmacionCompraPaquete(
+                        cliente.usuario.email,
+                        cliente.nickname ?? "Cliente",
+                        paquete.nombre,
+                        compra.monto_pagado,
+                        paquete.puntos_otorgados,
+                        cuponesCodigos
+                    );
+                }
+
                 return _mapper.Map<CompraDto>(compra);
             });
         }
-        private async Task GenerarCuponesPorCompraAsync(int compraId)
+        private async Task<List<cupones_cliente>> GenerarCuponesPorCompraAsync(int compraId)
         {
             var compra = await _compraRepository.GetByIdAsync(compraId);
             if (compra == null)
@@ -530,7 +578,9 @@ namespace AgencyPlatform.Infrastructure.Services.Cliente
 
             var paqueteDetalles = await _paqueteRepository.GetDetallesByPaqueteIdAsync(compra.paquete_id);
             if (paqueteDetalles == null || !paqueteDetalles.Any())
-                return; // No hay detalles de cupones para generar
+                return new List<cupones_cliente>(); // Retorna lista vacía si no hay detalles
+
+            var cuponesGenerados = new List<cupones_cliente>();
 
             foreach (var detalle in paqueteDetalles)
             {
@@ -551,10 +601,12 @@ namespace AgencyPlatform.Infrastructure.Services.Cliente
                     };
 
                     await _cuponRepository.AddAsync(cupon);
+                    cuponesGenerados.Add(cupon);
                 }
             }
 
             await _cuponRepository.SaveChangesAsync();
+            return cuponesGenerados;
         }
         public async Task<List<CompraDto>> GetHistorialComprasAsync(int clienteId)
         {
@@ -662,6 +714,18 @@ namespace AgencyPlatform.Infrastructure.Services.Cliente
                     {
                         _logger.LogError(ex, "Error al otorgar puntos mensuales de membresía VIP al cliente {ClienteId}", clienteId);
                     }
+                }
+
+                // 2.7) Notificar al cliente sobre la suscripción VIP
+                if (cliente.usuario?.email != null)
+                {
+                    await _emailProfesionalService.EnviarConfirmacionSuscripcionVIP(
+                        cliente.usuario.email,
+                        cliente.nickname ?? "Cliente",
+                        membresia.nombre,
+                        membresia.precio_mensual,
+                        fechaFin.ToString("dd/MM/yyyy")
+                    );
                 }
 
                 // Invalidar cachés del cliente usando el servicio de caché
@@ -908,6 +972,21 @@ namespace AgencyPlatform.Infrastructure.Services.Cliente
                 T result = await operation();
                 scope.Complete();
                 return result;
+            }
+        }
+
+        public async Task UpdateAsync(cliente cliente)
+        {
+            try
+            {
+                await _clienteRepository.UpdateAsync(cliente);
+                await _clienteRepository.SaveChangesAsync();
+                _logger.LogInformation("Cliente actualizado correctamente: ClienteId={ClienteId}", cliente.id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al actualizar cliente: ClienteId={ClienteId}", cliente.id);
+                throw;
             }
         }
 

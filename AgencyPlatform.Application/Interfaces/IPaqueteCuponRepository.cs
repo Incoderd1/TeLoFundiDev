@@ -12,5 +12,9 @@ namespace AgencyPlatform.Application.Interfaces
         Task<paquetes_cupone> GetByIdAsync(int id);
         Task<List<paquetes_cupone>> GetActivosAsync();
         Task<List<paquete_cupones_detalle>> GetDetallesByPaqueteIdAsync(int paqueteId);
+
+        Task<List<paquetes_cupone>> GetAllActivosAsync();
+       
+        Task<tipos_cupone> GetTipoCuponByIdAsync(int tipoCuponId);
     }
 }
