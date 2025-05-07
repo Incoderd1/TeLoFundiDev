@@ -34,6 +34,14 @@ namespace AgencyPlatform.Application.DTOs.Acompanantes
         public bool? EstaDisponible { get; set; }
         public string? FotoPrincipal { get; set; }
 
+        public string StripeAccountId { get; set; }
+        public bool StripePayoutsEnabled { get; set; }
+        public bool StripeChargesEnabled { get; set; }
+        public bool StripeOnboardingCompleted { get; set; }
+
+        public string Email { get; set; }
+
+
         public List<FotoDto> Fotos { get; set; } = new List<FotoDto>();
         public List<ServicioDto> Servicios { get; set; } = new List<ServicioDto>();
         public List<CategoriaDto> Categorias { get; set; } = new List<CategoriaDto>();

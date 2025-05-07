@@ -25,5 +25,6 @@ namespace AgencyPlatform.Application.Interfaces.Repositories
         Task<List<string>> GetRolesAsync(int usuarioId);
 
 
+
     }
 }

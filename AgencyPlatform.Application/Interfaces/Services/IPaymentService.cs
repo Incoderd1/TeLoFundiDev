@@ -1,4 +1,5 @@
-﻿using AgencyPlatform.Application.DTOs.Payment;
+﻿using AgencyPlatform.Application.DTOs.MetodoPago;
+using AgencyPlatform.Application.DTOs.Payment;
 using AgencyPlatform.Core.Entities;
 using Microsoft.Extensions.Logging;
 using Stripe;
@@ -36,6 +37,12 @@ namespace AgencyPlatform.Application.Interfaces.Services
         Task<transaccion> DistribuirPagoAAgencia(int agenciaId, decimal monto, string paymentIntentId);
         Task<string> GenerateOnboardingLinkAsync(string stripeAccountId, string returnUrl, string refreshUrl);
 
+
+       
+        Task<StripeAccountStatusDto> GetConnectedAccountStatusAsync(string stripeAccountId);
+        Task<bool> ActualizarEstadoCuentaConectadaAsync(string stripeAccountId);
+        Task<List<TransaccionPagoDto>> GetHistorialPagosAsync(int acompananteId, DateTime? desde = null, DateTime? hasta = null, int pagina = 1, int elementosPorPagina = 10);
+        Task<BalanceDto> GetBalanceAsync(string stripeAccountId);
 
 
     }

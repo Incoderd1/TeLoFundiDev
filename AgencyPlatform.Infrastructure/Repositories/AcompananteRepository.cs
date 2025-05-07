@@ -1,17 +1,11 @@
-﻿using AgencyPlatform.Application.Interfaces.Repositories;
-using AgencyPlatform.Core.Entities;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using Microsoft.EntityFrameworkCore;
-using AgencyPlatform.Application.DTOs.Estadisticas;
-using AgencyPlatform.Application.DTOs.Acompanantes;
-using Microsoft.Extensions.Logging;
+﻿using AgencyPlatform.Application.DTOs.Acompanantes;
 using AgencyPlatform.Application.DTOs.Busqueda;
-using MailKit.Search;
-using Stripe.Climate;
+using AgencyPlatform.Application.DTOs.Estadisticas;
+using AgencyPlatform.Application.Interfaces.Repositories;
+using AgencyPlatform.Core.Entities;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Org.BouncyCastle.Asn1;
 using System.Linq.Expressions;
 
 namespace AgencyPlatform.Infrastructure.Repositories
@@ -30,15 +24,31 @@ namespace AgencyPlatform.Infrastructure.Repositories
 
         public async Task<List<acompanante>> GetAllAsync()
         {
+            // Usa AsSplitQuery para mejorar el rendimiento con múltiples includes
             return await _context.acompanantes
+                .AsSplitQuery()
                 .Include(a => a.usuario)
                 .Include(a => a.fotos)
                 .Include(a => a.servicios)
-                .Include (a => a.whatsapp)
                 .Include(a => a.acompanante_categoria)
                     .ThenInclude(ac => ac.categoria)
                 .ToListAsync();
         }
+        public async Task AgregarCategoriaSinGuardarAsync(int acompananteId, int categoriaId)
+        {
+            var relacion = new acompanante_categoria
+            {
+                acompanante_id = acompananteId,
+                categoria_id = categoriaId,
+                created_at = DateTime.UtcNow
+            };
+
+            await _context.acompanante_categorias.AddAsync(relacion);
+            // No llamar a SaveChanges aquí
+        }
+       
+
+
 
         public async Task ActualizarScoreActividadAsync(int acompananteId, long scoreActividad)
         {
@@ -157,11 +167,11 @@ namespace AgencyPlatform.Infrastructure.Repositories
         }
 
         public async Task<List<acompanante>> BuscarAsync(string? busqueda, string? ciudad, string? pais, string? genero,
-            int? edadMinima, int? edadMaxima, decimal? tarifaMinima, decimal? tarifaMaxima,
-            bool? soloVerificados, bool? soloDisponibles, List<int>? categoriaIds,
-            string? ordenarPor, int pagina, int elementosPorPagina)
+      int? edadMinima, int? edadMaxima, decimal? tarifaMinima, decimal? tarifaMaxima,
+      bool? soloVerificados, bool? soloDisponibles, List<int>? categoriaIds,
+      string? ordenarPor, int pagina, int elementosPorPagina)
         {
-            // Iniciar con todos los acompañantes
+            // Consulta principal - mantiene la lógica original
             var query = _context.acompanantes
                 .Include(a => a.usuario)
                 .Include(a => a.fotos)
@@ -170,26 +180,45 @@ namespace AgencyPlatform.Infrastructure.Repositories
                     .ThenInclude(ac => ac.categoria)
                 .AsQueryable();
 
-            // Aplicar filtros
-            if (!string.IsNullOrEmpty(busqueda))
+            // Vamos a guardar varios niveles de consulta para usar como fallbacks
+            var queryNivel1 = query; // Sin filtros
+
+            // Aplicar filtros como antes
+            if (!string.IsNullOrWhiteSpace(busqueda))
             {
-                query = query.Where(a => a.nombre_perfil.Contains(busqueda) ||
-                                        a.descripcion!.Contains(busqueda));
+                query = query.Where(a =>
+                    (a.nombre_perfil != null && a.nombre_perfil.Contains(busqueda)) ||
+                    (a.descripcion != null && a.descripcion.Contains(busqueda)) ||
+                    (a.ciudad != null && a.ciudad.Contains(busqueda)) ||
+                    (a.pais != null && a.pais.Contains(busqueda))
+                );
             }
 
-            if (!string.IsNullOrEmpty(ciudad))
+            var queryNivel2 = query; // Solo con búsqueda textual
+
+            // Aplicar filtros de ubicación
+            if (!string.IsNullOrWhiteSpace(ciudad))
             {
-                query = query.Where(a => a.ciudad!.ToLower() == ciudad.ToLower());
+                query = query.Where(a => a.ciudad != null &&
+                    EF.Functions.ILike(a.ciudad, $"%{ciudad}%"));
             }
 
-            if (!string.IsNullOrEmpty(pais))
+            if (!string.IsNullOrWhiteSpace(pais))
             {
-                query = query.Where(a => a.pais!.ToLower() == pais.ToLower());
+                query = query.Where(a => a.pais != null &&
+                    (EF.Functions.ILike(a.pais, $"%{pais}%") ||
+                     a.pais == "RD" && pais.Contains("Dominican")));
             }
 
-            if (!string.IsNullOrEmpty(genero))
+            var queryNivel3 = query; // Con búsqueda textual y ubicación
+
+            // Aplicar filtros demográficos
+            if (!string.IsNullOrWhiteSpace(genero))
             {
-                query = query.Where(a => a.genero!.ToLower() == genero.ToLower());
+                query = query.Where(a => a.genero != null &&
+                    (EF.Functions.ILike(a.genero, $"%{genero}%") ||
+                     a.genero == "M" && genero.Contains("masculino") ||
+                     a.genero == "F" && genero.Contains("femenino")));
             }
 
             if (edadMinima.HasValue)
@@ -202,6 +231,9 @@ namespace AgencyPlatform.Infrastructure.Repositories
                 query = query.Where(a => a.edad <= edadMaxima.Value);
             }
 
+            var queryNivel4 = query; // Con búsqueda, ubicación y demografía
+
+            // Aplicar filtros económicos
             if (tarifaMinima.HasValue)
             {
                 query = query.Where(a => a.tarifa_base >= tarifaMinima.Value);
@@ -212,22 +244,28 @@ namespace AgencyPlatform.Infrastructure.Repositories
                 query = query.Where(a => a.tarifa_base <= tarifaMaxima.Value);
             }
 
-            if (soloVerificados.HasValue && soloVerificados.Value)
+            var queryNivel5 = query; // Con todos los filtros numéricos
+
+            // Aplicar filtros booleanos
+            if (soloVerificados == true)
             {
                 query = query.Where(a => a.esta_verificado == true);
             }
 
-            if (soloDisponibles.HasValue && soloDisponibles.Value)
+            if (soloDisponibles == true)
             {
                 query = query.Where(a => a.esta_disponible == true);
             }
 
+            var queryNivel6 = query; // Con todos los filtros excepto categorías
+
+            // Aplicar filtros de categoría
             if (categoriaIds != null && categoriaIds.Any())
             {
                 query = query.Where(a => a.acompanante_categoria.Any(ac => categoriaIds.Contains(ac.categoria_id)));
             }
 
-            // Aplicar ordenamiento
+            // Aplicar ordenamiento estándar
             query = ordenarPor?.ToLower() switch
             {
                 "precio_asc" => query.OrderBy(a => a.tarifa_base),
@@ -235,13 +273,72 @@ namespace AgencyPlatform.Infrastructure.Repositories
                 "edad_asc" => query.OrderBy(a => a.edad),
                 "edad_desc" => query.OrderByDescending(a => a.edad),
                 "popularidad" => query.OrderByDescending(a => a.score_actividad),
-                _ => query.OrderByDescending(a => a.created_at) // Por defecto, los más recientes
+                _ => query.OrderByDescending(a => a.created_at)
             };
 
-            // Aplicar paginación
-            query = query.Skip((pagina - 1) * elementosPorPagina).Take(elementosPorPagina);
+            // Aplicar paginación a la consulta principal
+            var paginatedQuery = query.Skip((pagina - 1) * elementosPorPagina).Take(elementosPorPagina);
 
-            return await query.ToListAsync();
+            // ALGORITMO DE SUGERENCIAS ALTERNATIVAS
+            // Intentar con la consulta principal primero
+            var resultados = await paginatedQuery.ToListAsync();
+
+            // Si no hay resultados, intentar progresivamente con consultas menos restrictivas
+            if (!resultados.Any())
+            {
+                // Nivel 6: Sin categorías
+                resultados = await queryNivel6
+                    .OrderByDescending(a => a.created_at)
+                    .Take(elementosPorPagina)
+                    .ToListAsync();
+
+                if (!resultados.Any())
+                {
+                    // Nivel 5: Sin filtros booleanos
+                    resultados = await queryNivel5
+                        .OrderByDescending(a => a.created_at)
+                        .Take(elementosPorPagina)
+                        .ToListAsync();
+
+                    if (!resultados.Any())
+                    {
+                        // Nivel 4: Sin filtros económicos
+                        resultados = await queryNivel4
+                            .OrderByDescending(a => a.created_at)
+                            .Take(elementosPorPagina)
+                            .ToListAsync();
+
+                        if (!resultados.Any())
+                        { 
+                            // Nivel 3: Sin filtros demográficos
+                            resultados = await queryNivel3
+                                .OrderByDescending(a => a.created_at)
+                                .Take(elementosPorPagina)
+                                .ToListAsync();
+
+                            if (!resultados.Any())
+                            {
+                                // Nivel 2: Solo con búsqueda textual
+                                resultados = await queryNivel2
+                                    .OrderByDescending(a => a.created_at)
+                                    .Take(elementosPorPagina)
+                                    .ToListAsync();
+
+                                if (!resultados.Any())
+                                {
+                                    // Nivel 1: Sin filtros, mostrar los más recientes
+                                    resultados = await queryNivel1
+                                        .OrderByDescending(a => a.created_at)
+                                        .Take(elementosPorPagina)
+                                        .ToListAsync();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            return resultados;
         }
 
         public async Task<List<acompanante_categoria>> GetCategoriasByAcompananteIdAsync(int acompananteId)
@@ -1487,25 +1584,16 @@ namespace AgencyPlatform.Infrastructure.Repositories
 
 
 
-        //public async Task<acompanante?> GetByStripeAccountIdAsync(string stripeAccountId)
-        //{
-        //    return await _context.acompanantes
-        //        .FirstOrDefaultAsync(a => a.stripe_account_id == stripeAccountId);
-        //}
 
-        //public async Task<List<acompanante>> GetPendientesStripeOnboardingAsync()
-        //{
-        //    return await _context.acompanantes
-        //        .Where(a => string.IsNullOrEmpty(a.stripe_account_id) && a.esta_disponible == true)
-        //        .ToListAsync();
-        //}
+        public async Task<acompanante> GetByStripeAccountIdAsync(string stripeAccountId)
+        {
+            return await _context.acompanantes
+                .FirstOrDefaultAsync(a => a.stripe_account_id == stripeAccountId);
+        }
 
 
 
-
-
-
-
+      
 
         // Método auxiliar para ejecutar consultas que devuelven un único valor
         private async Task<T> ExecuteScalarQueryAsync<T>(string sql)

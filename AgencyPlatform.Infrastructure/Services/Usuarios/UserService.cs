@@ -21,6 +21,8 @@ using AgencyPlatform.Infrastructure.Services.Acompanantes;
 using AgencyPlatform.Application.DTOs.Acompanantes;
 using AgencyPlatform.Application.DTOs.Agencias;
 using AgencyPlatform.Infrastructure.Repositories;
+using AgencyPlatform.Application.DTOs.Usuarios;
+using AutoMapper;
 
 namespace AgencyPlatform.Application.Services
 {
@@ -34,6 +36,7 @@ namespace AgencyPlatform.Application.Services
         private readonly IIntentoLoginRepository _intentoLoginRepository;
         private readonly IAcompananteService _acompananteService;
         private readonly IAgenciaRepository _agenciaRepository;
+        private readonly IMapper _mapper;
 
         // Lista de contraseñas comunes para prevenir su uso
         private static readonly HashSet<string> CommonPasswords = new HashSet<string> {
@@ -49,7 +52,8 @@ namespace AgencyPlatform.Application.Services
             ILogger<UserService> logger,
             IIntentoLoginRepository intentoLoginRepository,
             IAcompananteService acompananteService,
-            IAgenciaRepository agenciaRepository)
+            IAgenciaRepository agenciaRepository,
+            IMapper mapper)
         {
             _userRepository = userRepository;
             _configuration = configuration;
@@ -59,8 +63,13 @@ namespace AgencyPlatform.Application.Services
             _intentoLoginRepository = intentoLoginRepository;
             _acompananteService = acompananteService;
             _agenciaRepository = agenciaRepository;
+            _mapper = mapper;
         }
-
+        public async Task<UsuarioDto> GetByIdAsync(int id)
+        {
+            var usuario = await _userRepository.GetByIdAsync(id);
+            return _mapper.Map<UsuarioDto>(usuario);
+        }
         public async Task<usuario> RegisterUserAsync(string email, string password, string tipoUsuario, string? phone = null)
         {
             try

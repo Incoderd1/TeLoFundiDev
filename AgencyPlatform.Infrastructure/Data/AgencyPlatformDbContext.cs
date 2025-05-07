@@ -241,7 +241,7 @@ public partial class AgencyPlatformDbContext : DbContext
         });
         modelBuilder.Entity<solicitud_agencia>(entity =>
         {
-            entity.ToTable("solicitud_agencia");
+            entity.ToTable("solicitudes_registro_agencia");
 
             entity.HasKey(e => e.id);
 
@@ -342,6 +342,8 @@ public partial class AgencyPlatformDbContext : DbContext
             entity.Property(e => e.metadata).HasColumnType("text");
             entity.Property(e => e.created_at).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.updated_at).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.concepto).HasMaxLength(255);
+
 
             entity.HasOne(d => d.cliente)
                 .WithMany()
@@ -416,7 +418,13 @@ public partial class AgencyPlatformDbContext : DbContext
             entity.Property(e => e.score_actividad).HasDefaultValue(0L);
 
 
-           
+            entity.Property(e => e.stripe_account_id).HasMaxLength(100);
+            entity.Property(e => e.stripe_payouts_enabled).HasDefaultValue(false);
+            entity.Property(e => e.stripe_charges_enabled).HasDefaultValue(false);
+            entity.Property(e => e.stripe_onboarding_completed).HasDefaultValue(false);
+
+
+
 
             entity.Property(e => e.latitud);
             entity.Property(e => e.longitud);
@@ -519,6 +527,7 @@ public partial class AgencyPlatformDbContext : DbContext
             entity.Property(a => a.email).HasMaxLength(255);
             entity.Property(a => a.puntos_gastados).HasColumnName("puntos_gastados").HasDefaultValue(0);
             entity.Property(a => a.puntos_acumulados).HasColumnName("puntos_acumulados").HasDefaultValue(0);
+
 
             entity.Property(a => a.stripe_account_id).HasColumnName("stripe_account_id").HasMaxLength(50).IsRequired(false);
 

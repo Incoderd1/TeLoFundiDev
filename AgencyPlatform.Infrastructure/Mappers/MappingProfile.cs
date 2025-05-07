@@ -127,8 +127,18 @@ namespace AgencyPlatform.Infrastructure.Mappers
                     .ForMember(dest => dest.EstaDisponible, opt => opt.MapFrom(src => src.esta_disponible == true))
                     .ForMember(dest => dest.Fotos, opt => opt.MapFrom(src => src.fotos))
                     .ForMember(dest => dest.Servicios, opt => opt.MapFrom(src => src.servicios))
-                    // Comenta esta línea si no está definida la propiedad correctamente
-                    //.ForMember(dest => dest.Categorias, opt => opt.MapFrom(src => src.acompanante_categorias.Select(ac => ac.categoria)))
+                    .ForMember(dest => dest.StripeAccountId, opt => opt.MapFrom(src => src.stripe_account_id))
+                    .ForMember(dest => dest.StripePayoutsEnabled, opt => opt.MapFrom(src => src.stripe_payouts_enabled))
+                    .ForMember(dest => dest.StripeChargesEnabled, opt => opt.MapFrom(src => src.stripe_charges_enabled))
+                    .ForMember(dest => dest.StripeOnboardingCompleted, opt => opt.MapFrom(src => src.stripe_onboarding_completed))
+
+
+
+
+
+
+
+                   
                     .ForMember(dest => dest.FotoPrincipal, opt => opt.MapFrom(src =>
                                     src.fotos == null
                                     ? null

@@ -100,5 +100,29 @@ namespace AgencyPlatform.Infrastructure.Repositories
                 .Where(t => t.cliente_id == clienteId && t.estado == "completado")
                 .SumAsync(t => t.monto_total);
         }
+        public async Task<List<transaccion>> GetByAcompananteIdAsync(
+       int acompananteId,
+       DateTime? desde = null,
+       DateTime? hasta = null,
+       int pagina = 1,
+       int elementosPorPagina = 10)
+        {
+            var query = _context.transacciones
+                .Where(t => t.acompanante_id == acompananteId);
+
+            // Aplicar filtros de fecha si se proporcionan
+            if (desde.HasValue)
+                query = query.Where(t => t.fecha_transaccion >= desde.Value);
+
+            if (hasta.HasValue)
+                query = query.Where(t => t.fecha_transaccion <= hasta.Value);
+
+            // Aplicar ordenamiento y paginación
+            return await query
+                .OrderByDescending(t => t.fecha_transaccion)
+                .Skip((pagina - 1) * elementosPorPagina)
+                .Take(elementosPorPagina)
+                .ToListAsync();
+        }
     }
 }

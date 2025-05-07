@@ -11,7 +11,9 @@ namespace AgencyPlatform.Application.Interfaces.Services
         Task<UsuarioDto> ActualizarAsync(int id, UpdateUsuarioDto dto);
         Task<bool> EliminarAsync(int id);
         Task<AuthResponseDto> RenovarTokenAsync(RefreshTokenResponseDto dto, string ip, string userAgent);
-        
+        Task<UsuarioDto> GetByIdAsync(int id);
+
+
 
 
     }

@@ -18,6 +18,9 @@ using Microsoft.Extensions.Logging;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using AgencyPlatform.Application;
+using AgencyPlatform.Application.DTOs.Busqueda;
+using AgencyPlatform.Application.Interfaces.Services.AdvancedSearch;
+using AgencyPlatform.Infrastructure.Services.AdvancedSearch;
 
 namespace AgencyPlatform.API.Controllers
 {
@@ -31,6 +34,8 @@ namespace AgencyPlatform.API.Controllers
         private readonly IFotoService _fotoService;
         private readonly IUserService _userService;
         private readonly IPaymentService _paymentService;
+        private readonly IAdvancedSearchService _searchService;
+
 
         public AcompanantesController(
             IAcompananteService acompananteService,
@@ -38,7 +43,8 @@ namespace AgencyPlatform.API.Controllers
             IAgenciaService agenciaService,
             IFotoService fotoService,
             IUserService userService,
-            IPaymentService paymentService)
+            IPaymentService paymentService,
+            IAdvancedSearchService searchService)
         {
             _acompananteService = acompananteService;
             _logger = logger;
@@ -46,6 +52,7 @@ namespace AgencyPlatform.API.Controllers
             _fotoService = fotoService;
             _userService = userService;
             _paymentService = paymentService;
+            _searchService = searchService;
         }
 
         /// <summary>
@@ -661,6 +668,25 @@ namespace AgencyPlatform.API.Controllers
                 return StatusCode(500, new { Message = "Error interno del servidor", Error = ex.Message });
             }
         }
+        [HttpPost("BusquedaAvanzada")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        public async Task<ActionResult<PaginatedResultDto<AcompananteSearchResultDto>>> BusquedaAvanzada(
+       [FromBody] AdvancedSearchCriteriaDto criteria)
+        {
+            try
+            {
+                _logger.LogInformation("Realizando búsqueda avanzada de acompañantes");
+                var results = await _searchService.SearchAcompanantesAsync(criteria);
+                return Ok(results);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al realizar búsqueda avanzada");
+                return BadRequest(new { error = "Error al procesar la búsqueda. Inténtelo de nuevo." });
+            }
+        }
+      
 
         /// <summary>
         /// Obtiene los acompañantes destacados

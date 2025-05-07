@@ -22,5 +22,12 @@ namespace AgencyPlatform.Application.Interfaces.Repositories
         Task<List<transaccion>> GetByAgenciaIdAsync(int agenciaId);
         Task<transaccion> GetByExternalIdAsync(string externalId);
         Task<decimal> GetTotalPagadoByClienteIdAsync(int clienteId);
+
+        Task<List<transaccion>> GetByAcompananteIdAsync(
+        int acompananteId,
+        DateTime? desde = null,
+        DateTime? hasta = null,
+        int pagina = 1,
+        int elementosPorPagina = 10);
     }
 }

@@ -19,6 +19,7 @@ namespace AgencyPlatform.Application.Interfaces.Repositories
         Task UpdateAsync(acompanante entity);
         Task DeleteAsync(acompanante entity);
         Task SaveChangesAsync();
+        Task AgregarCategoriaSinGuardarAsync(int acompananteId, int categoriaId);
         Task<List<acompanante>> GetDestacadosAsync();
         Task<List<acompanante>> GetRecientesAsync(int cantidad);
         Task<List<acompanante>> GetPopularesAsync(int cantidad);
@@ -152,6 +153,7 @@ namespace AgencyPlatform.Application.Interfaces.Repositories
         //Task<List<acompanante>> GetPendientesStripeOnboardingAsync();
 
 
+        Task<acompanante> GetByStripeAccountIdAsync(string stripeAccountId);
 
 
     }

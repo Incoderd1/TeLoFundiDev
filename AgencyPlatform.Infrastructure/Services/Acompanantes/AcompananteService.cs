@@ -10,6 +10,7 @@ using AgencyPlatform.Application.Interfaces.Services.Acompanantes;
 using AgencyPlatform.Application.Interfaces.Services.Geocalizacion;
 using AgencyPlatform.Core.Entities;
 using AutoMapper;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 
@@ -83,7 +84,7 @@ namespace AgencyPlatform.Infrastructure.Services.Acompanantes
             _logger.LogInformation("Acompañante con ID {AcompananteId} obtenido correctamente.", id);
             return _mapper.Map<AcompananteDto>(acompanante);
         }
-
+       
         public async Task<AcompananteDto> GetByUsuarioIdAsync(int usuarioId)
         {
             _logger.LogInformation("Obteniendo acompañante para usuario {UsuarioId}.", usuarioId);
@@ -107,9 +108,6 @@ namespace AgencyPlatform.Infrastructure.Services.Acompanantes
                 _logger.LogWarning("Intento de crear acompañante con edad inválida: {Edad}.", nuevoAcompanante.Edad);
                 throw new ArgumentException("La edad debe ser mayor o igual a 18.");
             }
-
-            // Verificar si el usuario ya tiene un perfil de acompañante
-            var existingAcompanante = await _acompananteRepository.GetByUsuarioIdAsync(usuarioId);
 
             // Verificar que el usuario exista
             var usuario = await _usuarioRepository.GetByIdAsync(usuarioId);
@@ -149,6 +147,10 @@ namespace AgencyPlatform.Infrastructure.Services.Acompanantes
                 _logger.LogWarning("IP del cliente no válida: {ClientIp}. No se puede obtener la ubicación.", clientIp);
             }
 
+            // IMPORTANTE: Consultar el acompañante existente una sola vez y antes de iniciar operaciones
+            var existingAcompanante = await _acompananteRepository.GetByUsuarioIdAsync(usuarioId);
+            int acompananteId;
+
             if (existingAcompanante != null)
             {
                 _logger.LogInformation("Acompañante existente encontrado para usuario {UsuarioId}. Actualizando perfil.", usuarioId);
@@ -179,8 +181,13 @@ namespace AgencyPlatform.Infrastructure.Services.Acompanantes
                 existingAcompanante.updated_at = DateTime.UtcNow;
                 existingAcompanante.esta_disponible = true;
 
+                // Inicializar campos Stripe si son nulos para evitar el error
+                if (existingAcompanante.stripe_account_id == null)
+                    existingAcompanante.stripe_account_id = "";
+
                 await _acompananteRepository.UpdateAsync(existingAcompanante);
-                await _acompananteRepository.SaveChangesAsync();
+
+                acompananteId = existingAcompanante.id;
 
                 // Agregar categorías si se proporcionaron
                 if (nuevoAcompanante.CategoriaIds != null && nuevoAcompanante.CategoriaIds.Any())
@@ -190,14 +197,11 @@ namespace AgencyPlatform.Infrastructure.Services.Acompanantes
                     {
                         if (!await _acompananteRepository.TieneCategoriaAsync(existingAcompanante.id, categoriaId))
                         {
-                            await _acompananteRepository.AgregarCategoriaAsync(existingAcompanante.id, categoriaId);
+                            await _acompananteRepository.AgregarCategoriaSinGuardarAsync(existingAcompanante.id, categoriaId);
                             _logger.LogDebug("Categoría {CategoriaId} agregada al acompañante {AcompananteId}.", categoriaId, existingAcompanante.id);
                         }
                     }
                 }
-
-                _logger.LogInformation("Perfil de acompañante actualizado para usuario {UsuarioId}. AcompañanteId: {AcompañanteId}.", usuarioId, existingAcompanante.id);
-                return existingAcompanante.id;
             }
             else
             {
@@ -232,28 +236,38 @@ namespace AgencyPlatform.Infrastructure.Services.Acompanantes
                     esta_verificado = false,
                     esta_disponible = true,
                     created_at = DateTime.UtcNow,
-                    score_actividad = 0
+                    score_actividad = 0,
+                    // Inicializar campos de Stripe con valores por defecto
+                    stripe_account_id = "",
+                    stripe_payouts_enabled = false,
+                    stripe_charges_enabled = false,
+                    stripe_onboarding_completed = false
                 };
 
                 await _acompananteRepository.AddAsync(acompanante);
+                // Necesitamos guardar aquí para obtener el ID
                 await _acompananteRepository.SaveChangesAsync();
+
+                acompananteId = acompanante.id;
 
                 // Agregar categorías si se proporcionaron
                 if (nuevoAcompanante.CategoriaIds != null && nuevoAcompanante.CategoriaIds.Any())
                 {
-                    _logger.LogInformation("Agregando {Count} categorías al nuevo acompañante {AcompananteId}.", nuevoAcompanante.CategoriaIds.Count, acompanante.id);
+                    _logger.LogInformation("Agregando {Count} categorías al nuevo acompañante {AcompananteId}.", nuevoAcompanante.CategoriaIds.Count, acompananteId);
                     foreach (var categoriaId in nuevoAcompanante.CategoriaIds)
                     {
-                        await _acompananteRepository.AgregarCategoriaAsync(acompanante.id, categoriaId);
-                        _logger.LogDebug("Categoría {CategoriaId} agregada al acompañante {AcompananteId}.", categoriaId, acompanante.id);
+                        await _acompananteRepository.AgregarCategoriaSinGuardarAsync(acompananteId, categoriaId);
+                        _logger.LogDebug("Categoría {CategoriaId} agregada al acompañante {AcompananteId}.", categoriaId, acompananteId);
                     }
                 }
-
-                _logger.LogInformation("Acompañante creado para usuario {UsuarioId}. AcompañanteId: {AcompañanteId}.", usuarioId, acompanante.id);
-                return acompanante.id;
             }
-        }
 
+            // Guardar todos los cambios pendientes de una sola vez
+            await _acompananteRepository.SaveChangesAsync();
+
+            _logger.LogInformation("Acompañante creado/actualizado para usuario {UsuarioId}. AcompañanteId: {AcompananteId}.", usuarioId, acompananteId);
+            return acompananteId;
+        }
         public async Task ActualizarAsync(UpdateAcompananteDto acompananteActualizado, int usuarioId, int rolId, string clientIp)
         {
             _logger.LogInformation("Actualizando acompañante {AcompananteId} por usuario {UsuarioId} con rol {RolId} y IP {ClientIp}.", acompananteActualizado.Id, usuarioId, rolId, clientIp);
@@ -1254,6 +1268,36 @@ namespace AgencyPlatform.Infrastructure.Services.Acompanantes
 
             _logger.LogInformation("Se obtuvieron {Count} acompañantes. Total: {TotalItems}.", result.Items.Count, total);
             return result;
+        }
+
+
+        public async Task<bool> ActualizarStripeAccountIdAsync(int acompananteId, string stripeAccountId)
+        {
+            var acompanante = await _acompananteRepository.GetByIdAsync(acompananteId);
+            if (acompanante == null)
+                return false;
+
+            acompanante.stripe_account_id = stripeAccountId;
+
+            await _acompananteRepository.UpdateAsync(acompanante);
+            await _acompananteRepository.SaveChangesAsync();
+
+            return true;
+        }
+
+        public async Task<bool> ActualizarEstatusCuentaPagoAsync(int acompananteId, string estado)
+        {
+            var acompanante = await _acompananteRepository.GetByIdAsync(acompananteId);
+            if (acompanante == null)
+                return false;
+
+            // Actualizar estado basado en la respuesta de Stripe
+            acompanante.stripe_onboarding_completed = estado == "completed";
+
+            await _acompananteRepository.UpdateAsync(acompanante);
+            await _acompananteRepository.SaveChangesAsync();
+
+            return true;
         }
     }
 }

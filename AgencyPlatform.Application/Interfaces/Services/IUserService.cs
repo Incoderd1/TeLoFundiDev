@@ -1,4 +1,5 @@
-﻿using AgencyPlatform.Core.Entities;
+﻿using AgencyPlatform.Application.DTOs.Usuarios;
+using AgencyPlatform.Core.Entities;
 using AgencyPlatform.Core.Enums;
 
 namespace AgencyPlatform.Application.Interfaces.Services
@@ -20,6 +21,8 @@ namespace AgencyPlatform.Application.Interfaces.Services
         Task UpdateUserAsync(int id, string email, string? phone, bool estaActivo);
         Task DeleteUserAsync(int id);
         Task NotificarAdminDeSolicitudAgenciaAsync();
+        Task<UsuarioDto> GetByIdAsync(int id);
+
 
 
 

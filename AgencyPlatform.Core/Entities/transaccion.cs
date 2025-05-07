@@ -23,6 +23,8 @@ namespace AgencyPlatform.Core.Entities
         public string metadata { get; set; }
         public DateTime created_at { get; set; }
         public DateTime updated_at { get; set; }
+        public string concepto { get; set; }
+
 
         // Navegación
         public virtual cliente cliente { get; set; }

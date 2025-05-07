@@ -24,6 +24,9 @@ namespace AgencyPlatform.Core.Entities
         public DateTime created_at { get; set; }
         public DateTime updated_at { get; set; }
 
+        public string concepto { get; set; }
+
+
         // Navegación
         public virtual transaccion transaccion { get; set; }
     }

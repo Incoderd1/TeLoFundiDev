@@ -1965,6 +1965,13 @@ namespace AgencyPlatform.Infrastructure.Services.Agencias
 
         }
 
+
+        public async Task<bool> EsPropietarioAgenciaAsync(int agenciaId, int usuarioId)
+        {
+            var agencia = await _agenciaRepository.GetByIdAsync(agenciaId);
+            return agencia != null && agencia.usuario_id == usuarioId;
+        }
+
     }
 
 }

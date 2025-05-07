@@ -63,7 +63,8 @@ namespace AgencyPlatform.Application.Interfaces.Services.Acompanantes
         Task<PaginatedResultDto<AcompananteDto>> GetAllAsync(int pageNumber = 1, int pageSize = 10);
 
 
-
+        Task<bool> ActualizarStripeAccountIdAsync(int acompananteId, string stripeAccountId);
+        Task<bool> ActualizarEstatusCuentaPagoAsync(int acompananteId, string estado);
 
 
     }

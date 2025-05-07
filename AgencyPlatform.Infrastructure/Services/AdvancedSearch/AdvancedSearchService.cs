@@ -768,5 +768,8 @@ namespace AgencyPlatform.Infrastructure.Services.AdvancedSearch
                 // No relanzar la excepción para evitar afectar al usuario
             }
         }
+
+
+
     }
 }

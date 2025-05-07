@@ -48,7 +48,6 @@ public partial class acompanante
 
     public DateTime? updated_at { get; set; }
 
-    // Campos que faltan en tu clase acompanante:
     public string? telefono { get; set; }           // character varying(20)
     public string? whatsapp { get; set; }           // character varying(20)
     public string? email_contacto { get; set; }     // character varying(255)
@@ -59,9 +58,12 @@ public partial class acompanante
     public double? latitud { get; set; }
     public double? longitud { get; set; }
     public string? direccion_completa { get; set; }
-    //public string? stripe_account_id { get; set; }
+    public string? stripe_account_id { get; set; }
+    public bool stripe_payouts_enabled { get; set; }
+    public bool stripe_charges_enabled { get; set; }
+    public bool stripe_onboarding_completed { get; set; }
 
-  
+
 
 
     public virtual ICollection<acompanante_categoria> acompanante_categoria { get; set; } = new List<acompanante_categoria>();

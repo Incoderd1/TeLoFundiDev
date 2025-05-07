@@ -111,6 +111,7 @@ namespace AgencyPlatform.Application.Interfaces.Services.Agencias
         Task<AnuncioDestacadoDto> GetAnuncioByReferenceIdAsync(string referenceId);
         Task UpdateAnuncioAsync(AnuncioDestacadoDto anuncio);
         Task<bool> ConfirmarPagoVerificacionAsync(int pagoId, string referenciaPago);
+        Task<bool> EsPropietarioAgenciaAsync(int agenciaId, int usuarioId);
 
 
     }

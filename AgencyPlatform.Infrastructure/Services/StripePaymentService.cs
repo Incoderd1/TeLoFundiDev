@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using AgencyPlatform.Application.DTOs.Payment;
+using AgencyPlatform.Application.DTOs.MetodoPago;
 
 namespace AgencyPlatform.Infrastructure.Services
 {
@@ -783,5 +784,169 @@ namespace AgencyPlatform.Infrastructure.Services
                 throw;
             }
         }
+
+
+        public async Task<StripeAccountStatusDto> GetConnectedAccountStatusAsync(string stripeAccountId)
+        {
+            try
+            {
+                var service = new AccountService();
+                var account = await service.GetAsync(stripeAccountId);
+
+                return new StripeAccountStatusDto
+                {
+                    Status = account.BusinessType,
+                    PayoutsEnabled = account.PayoutsEnabled,
+                    ChargesEnabled = account.ChargesEnabled,
+                    AccountId = account.Id,
+                    RequiereAccion = !(account.DetailsSubmitted && account.PayoutsEnabled)
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al obtener estado de cuenta conectada {StripeAccountId}", stripeAccountId);
+                throw;
+            }
+        }
+
+        public async Task<bool> ActualizarEstadoCuentaConectadaAsync(string stripeAccountId)
+        {
+            try
+            {
+                var service = new AccountService();
+                var account = await service.GetAsync(stripeAccountId);
+
+                // Busca el acompañante asociado a esta cuenta
+                var acompanante = await _acompananteRepository.GetByStripeAccountIdAsync(stripeAccountId);
+                if (acompanante == null)
+                {
+                    _logger.LogWarning("No se encontró acompañante con cuenta Stripe {StripeAccountId}", stripeAccountId);
+                    return false;
+                }
+
+                // Actualiza el estado en la base de datos
+                acompanante.stripe_payouts_enabled = account.PayoutsEnabled;
+                acompanante.stripe_charges_enabled = account.ChargesEnabled;
+                acompanante.stripe_onboarding_completed = account.DetailsSubmitted;
+
+                await _acompananteRepository.UpdateAsync(acompanante);
+                await _acompananteRepository.SaveChangesAsync();
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al actualizar estado de cuenta conectada {StripeAccountId}", stripeAccountId);
+                return false;
+            }
+        }
+
+        public async Task<List<TransaccionPagoDto>> GetHistorialPagosAsync(
+            int acompananteId,
+            DateTime? desde = null,
+            DateTime? hasta = null,
+            int pagina = 1,
+            int elementosPorPagina = 10)
+        {
+            try
+            {
+                var acompanante = await _acompananteRepository.GetByIdAsync(acompananteId);
+                if (acompanante == null || string.IsNullOrEmpty(acompanante.stripe_account_id))
+                    return new List<TransaccionPagoDto>();
+
+                // Obtener pagos de la base de datos
+                var transacciones = await _transaccionRepository.GetByAcompananteIdAsync(
+                    acompananteId, desde, hasta, pagina, elementosPorPagina);
+
+                return transacciones.Select(t => new TransaccionPagoDto
+                {
+                    Id = t.id_transaccion_externa ?? t.id.ToString(),
+                    Monto = t.monto_acompanante,
+                    Moneda = "USD", // O usar la moneda de la transacción si está disponible
+                    Estado = t.estado,
+                    FechaCreacion = t.fecha_transaccion,
+                    Concepto = t.concepto
+                }).ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al obtener historial de pagos para acompañante {AcompananteId}", acompananteId);
+                return new List<TransaccionPagoDto>();
+            }
+        }
+        public async Task<BalanceDto> GetBalanceAsync(string stripeAccountId)
+        {
+            try
+            {
+                var service = new BalanceService();
+                var balance = await service.GetAsync(null, new RequestOptions { StripeAccount = stripeAccountId });
+
+                // Obtener el balance disponible en USD (o la moneda principal)
+                var disponible = balance.Available.FirstOrDefault(b => b.Currency == "usd") ?? balance.Available.FirstOrDefault();
+                var pendiente = balance.Pending.FirstOrDefault(b => b.Currency == "usd") ?? balance.Pending.FirstOrDefault();
+
+                return new BalanceDto
+                {
+                    Disponible = disponible != null ? Convert.ToDecimal(disponible.Amount) / 100 : 0,
+                    Pendiente = pendiente != null ? Convert.ToDecimal(pendiente.Amount) / 100 : 0,
+                    Moneda = disponible?.Currency?.ToUpper() ?? "USD"
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al obtener balance para cuenta Stripe {StripeAccountId}", stripeAccountId);
+                return new BalanceDto { Disponible = 0, Pendiente = 0, Moneda = "USD" };
+            }
+        }
+
+
+
+        // En StripePaymentService
+        public async Task<bool> TransferirAAcompanante(int acompananteId, decimal monto, string descripcion)
+        {
+            try
+            {
+                var acompanante = await _acompananteRepository.GetByIdAsync(acompananteId);
+                if (acompanante == null || string.IsNullOrEmpty(acompanante.stripe_account_id))
+                    throw new Exception($"Acompañante {acompananteId} no tiene cuenta Stripe configurada");
+
+                // Transferir dinero a la cuenta Stripe Connect del acompañante
+                var transferOptions = new TransferCreateOptions
+                {
+                    Amount = (long)(monto * 100),
+                    Currency = "usd",
+                    Destination = acompanante.stripe_account_id,
+                    Description = descripcion
+                };
+
+                var transferService = new TransferService();
+                var transfer = await transferService.CreateAsync(transferOptions);
+
+                // Registrar la transferencia en nuestra base de datos
+                var transferencia = new transferencia
+                {
+                    origen_tipo = "plataforma",
+                    destino_id = acompananteId,
+                    destino_tipo = "acompanante",
+                    monto = monto,
+                    concepto = descripcion,
+                    estado = "completado",
+                    proveedor_pago = "stripe",
+                    id_transferencia_externa = transfer.Id,
+                    fecha_procesamiento = DateTime.UtcNow
+                };
+
+                await _transferenciaRepository.AddAsync(transferencia);
+                await _transferenciaRepository.SaveChangesAsync();
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al transferir dinero a acompañante {AcompananteId}", acompananteId);
+                return false;
+            }
+        }
+
     }
 }
